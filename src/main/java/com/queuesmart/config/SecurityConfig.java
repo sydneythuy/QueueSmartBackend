@@ -18,6 +18,22 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
+/**
+ * SecurityConfig – QueueSmart Spring Security Configuration
+ *
+ * <p>Defines the security filter chain for the QueueSmart REST API:</p>
+ * <ul>
+ *   <li>Stateless session management (JWT-based, no server-side sessions)</li>
+ *   <li>CORS policy: allows all origins in development (restrict in production)</li>
+ *   <li>CSRF disabled (not needed for stateless JWT APIs)</li>
+ *   <li>Public endpoints: POST /api/auth/register, POST /api/auth/login</li>
+ *   <li>Admin-only: POST/PUT/DELETE /api/services, POST /api/queue/serve/**</li>
+ *   <li>All other endpoints require a valid JWT Bearer token</li>
+ * </ul>
+ *
+ * <p>The {@link JwtAuthFilter} is inserted before Spring's UsernamePasswordAuthenticationFilter
+ * to validate tokens on every request before they reach the controller layer.</p>
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
