@@ -42,4 +42,45 @@ public class HistoryService {
                 .filter(r -> r.getFinalStatus() == com.queuesmart.model.QueueEntry.QueueStatus.SERVED)
                 .count();
     }
+
+
+    /**
+     * Returns the N most recent history records for a user, sorted by completion time.
+     */
+    public java.util.List<HistoryRecord> getRecentHistory(String userId, int limit) {
+        return historyRepository.findByUserId(userId).stream()
+                .sorted((a, b) -> b.getCompletedAt().compareTo(a.getCompletedAt()))
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Returns total number of times a user has joined a queue.
+     */
+    public long countUserHistory(String userId) {
+        return historyRepository.findByUserId(userId).size();
+    }
+
+    /**
+     * Returns history records filtered by final status (SERVED or LEFT).
+     */
+    public java.util.List<HistoryRecord> getHistoryByStatus(String userId,
+            com.queuesmart.model.QueueEntry.QueueStatus status) {
+        return historyRepository.findByUserId(userId).stream()
+                .filter(r -> r.getFinalStatus() == status)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Returns the service the user has visited most frequently.
+     */
+    public String getMostVisitedService(String userId) {
+        return historyRepository.findByUserId(userId).stream()
+                .collect(Collectors.groupingBy(HistoryRecord::getServiceName, Collectors.counting()))
+                .entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse("None");
+    }
+
 }
