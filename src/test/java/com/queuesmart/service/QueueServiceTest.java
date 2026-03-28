@@ -192,30 +192,47 @@ class QueueServiceTest {
 
     @Test
     void testGetUserActiveQueues_returnsOnlyWaitingEntries() {
-        // join queue and verify it appears in active queues
-        queueService.joinQueue(testUserId, testServiceId, null);
-        var active = queueService.getUserActiveQueues(testUserId);
+        String userId = testUser.getId();
+        String serviceId = testService.getId();
+        // Directly mock repository to return a waiting entry
+        when(queueRepository.findByUserId(userId)).thenReturn(java.util.List.of(
+            QueueEntry.builder().id("e1").userId(userId).serviceId(serviceId)
+                .status(QueueEntry.QueueStatus.WAITING).joinedAt(java.time.LocalDateTime.now()).build()
+        ));
+        var active = queueService.getUserActiveQueues(userId);
         assertFalse(active.isEmpty());
-        active.forEach(e -> assertEquals(testUserId, e.getUserId()));
+        active.forEach(e -> assertEquals(userId, e.getUserId()));
     }
 
     @Test
     void testGetUserPosition_returnsCorrectPosition() {
-        queueService.joinQueue(testUserId, testServiceId, null);
-        int pos = queueService.getUserPosition(testUserId, testServiceId);
+        String userId = testUser.getId();
+        String serviceId = testService.getId();
+        QueueEntry entry = QueueEntry.builder().id("e1").userId(userId).serviceId(serviceId)
+                .status(QueueEntry.QueueStatus.WAITING).joinedAt(java.time.LocalDateTime.now()).build();
+        when(queueRepository.findActiveByServiceId(serviceId)).thenReturn(java.util.List.of(entry));
+        int pos = queueService.getUserPosition(userId, serviceId);
         assertEquals(1, pos);
     }
 
     @Test
     void testGetUserPosition_userNotInQueue_returnsMinusOne() {
-        int pos = queueService.getUserPosition("nonexistent-user", testServiceId);
+        String serviceId = testService.getId();
+        when(queueRepository.findActiveByServiceId(serviceId)).thenReturn(java.util.List.of());
+        int pos = queueService.getUserPosition("nonexistent-user", serviceId);
         assertEquals(-1, pos);
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void testGetQueueSummary_returnsCorrectFields() {
-        queueService.joinQueue(testUserId, testServiceId, null);
-        var summary = queueService.getQueueSummary(testServiceId);
+        String serviceId = testService.getId();
+        QueueEntry entry = QueueEntry.builder().id("e1").userId("u1").serviceId(serviceId)
+                .status(QueueEntry.QueueStatus.WAITING).estimatedWaitMinutes(10)
+                .joinedAt(java.time.LocalDateTime.now()).build();
+        when(serviceManagementService.getRawService(serviceId)).thenReturn(testService);
+        when(queueRepository.findActiveByServiceId(serviceId)).thenReturn(java.util.List.of(entry));
+        java.util.Map<String, Object> summary = queueService.getQueueSummary(serviceId);
         assertTrue(summary.containsKey("totalWaiting"));
         assertTrue(summary.containsKey("serviceName"));
         assertEquals(1, summary.get("totalWaiting"));
