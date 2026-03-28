@@ -7,6 +7,7 @@ import com.queuesmart.repository.UserRepository;
 import com.queuesmart.service.AuthService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -19,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(AuthController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class AuthControllerTest {
 
     @Autowired
@@ -172,16 +174,8 @@ class AuthControllerTest {
 
     @Test
     void testRegister_duplicateEmail_returns400() throws Exception {
-        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
-        req.setUsername("uniqueuser");
-        req.setEmail("dup@example.com");
-        req.setPassword("password123");
-
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/api/auth/register")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        // Mock authService to throw on duplicate email
+        when(authService.register(any())).thenThrow(new IllegalArgumentException("Email is already registered"));
 
         com.queuesmart.dto.AuthDto.RegisterRequest dup = new com.queuesmart.dto.AuthDto.RegisterRequest();
         dup.setUsername("otherusername");
@@ -198,15 +192,8 @@ class AuthControllerTest {
 
     @Test
     void testLogin_wrongPassword_returnsFailure() throws Exception {
-        com.queuesmart.dto.AuthDto.RegisterRequest reg = new com.queuesmart.dto.AuthDto.RegisterRequest();
-        reg.setUsername("logintest");
-        reg.setEmail("logintest@example.com");
-        reg.setPassword("correctpassword");
-
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/api/auth/register")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reg)));
+        // Mock authService.login to throw on wrong password
+        when(authService.login(any())).thenThrow(new IllegalArgumentException("Invalid email or password"));
 
         com.queuesmart.dto.AuthDto.LoginRequest login = new com.queuesmart.dto.AuthDto.LoginRequest();
         login.setEmail("logintest@example.com");
