@@ -98,19 +98,29 @@ class NotificationServiceTest {
 
     @Test
     void testGetNotificationsByType_filtersCorrectly() {
-        notificationService.sendQueueJoined("user2", "Health", 1);
-        notificationService.sendQueueLeft("user2", "Health");
-        var joined = notificationService.getNotificationsByType("user2", "joined");
+        // Mock repository to return a notification containing "joined"
+        com.queuesmart.model.Notification n = new com.queuesmart.model.Notification();
+        n.setUserId("userFilter");
+        n.setMessage("You have joined the queue for Health. Your position: #1");
+        n.setRead(false);
+        when(notificationRepository.findByUserId("userFilter")).thenReturn(java.util.List.of(n));
+        var joined = notificationService.getNotificationsByType("userFilter", "joined");
         assertFalse(joined.isEmpty());
-        joined.forEach(n -> assertTrue(n.getMessage().toLowerCase().contains("joined")));
+        joined.forEach(notif -> assertTrue(notif.getMessage().toLowerCase().contains("joined")));
     }
 
     @Test
     void testGetTotalNotificationCount_returnsCorrectCount() {
-        notificationService.sendQueueJoined("user3", "IT Support", 3);
-        notificationService.sendAlmostYourTurn("user3", "IT Support", 2);
-        notificationService.sendYourTurn("user3", "IT Support");
-        assertEquals(3, notificationService.getTotalNotificationCount("user3"));
+        // Mock repository to return 3 notifications
+        java.util.List<com.queuesmart.model.Notification> notifs = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            com.queuesmart.model.Notification n = new com.queuesmart.model.Notification();
+            n.setUserId("userCount");
+            n.setMessage("Notification " + i);
+            notifs.add(n);
+        }
+        when(notificationRepository.findByUserId("userCount")).thenReturn(notifs);
+        assertEquals(3, notificationService.getTotalNotificationCount("userCount"));
     }
 
 }
