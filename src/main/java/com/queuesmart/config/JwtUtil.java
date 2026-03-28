@@ -60,4 +60,46 @@ public class JwtUtil {
                 .parseClaimsJws(token)
                 .getBody();
     }
+
+
+    /**
+     * Extracts the role claim from a JWT token.
+     * Used to determine USER vs ADMIN access without re-querying the database.
+     */
+    public String getRoleFromToken(String token) {
+        return (String) getClaimsFromToken(token).get("role");
+    }
+
+    /**
+     * Extracts the email claim from a JWT token.
+     */
+    public String getEmailFromToken(String token) {
+        return (String) getClaimsFromToken(token).get("email");
+    }
+
+    /**
+     * Returns true if the token is expired, false otherwise.
+     */
+    public boolean isTokenExpired(String token) {
+        try {
+            Claims claims = getClaimsFromToken(token);
+            return claims.getExpiration().before(new Date());
+        } catch (ExpiredJwtException e) {
+            return true;
+        }
+    }
+
+    /**
+     * Returns remaining validity time in seconds for a token.
+     */
+    public long getTokenRemainingSeconds(String token) {
+        try {
+            Date expiration = getClaimsFromToken(token).getExpiration();
+            long diff = expiration.getTime() - System.currentTimeMillis();
+            return Math.max(0, diff / 1000);
+        } catch (ExpiredJwtException e) {
+            return 0;
+        }
+    }
+
 }
