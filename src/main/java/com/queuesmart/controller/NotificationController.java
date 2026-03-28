@@ -60,4 +60,33 @@ public class NotificationController {
         notificationService.markAsRead(id);
         return ResponseEntity.ok(ApiResponse.success("Notification marked as read", null));
     }
+
+
+    /**
+     * GET /api/notifications/filter?keyword=joined
+     * Returns notifications matching a keyword in the message.
+     */
+    @GetMapping("/filter")
+    public org.springframework.http.ResponseEntity<com.queuesmart.dto.ApiResponse<java.util.List<com.queuesmart.model.Notification>>> filterNotifications(
+            @org.springframework.web.bind.annotation.RequestParam String keyword,
+            org.springframework.security.core.Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        var results = notificationService.getNotificationsByType(userId, keyword);
+        return org.springframework.http.ResponseEntity.ok(
+                com.queuesmart.dto.ApiResponse.success("Filtered notifications", results));
+    }
+
+    /**
+     * PATCH /api/notifications/read-all
+     * Marks all notifications as read for the authenticated user.
+     */
+    @org.springframework.web.bind.annotation.PatchMapping("/read-all")
+    public org.springframework.http.ResponseEntity<com.queuesmart.dto.ApiResponse<Void>> markAllRead(
+            org.springframework.security.core.Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        notificationService.markAllAsRead(userId);
+        return org.springframework.http.ResponseEntity.ok(
+                com.queuesmart.dto.ApiResponse.success("All notifications marked as read", null));
+    }
+
 }
