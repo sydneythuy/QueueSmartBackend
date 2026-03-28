@@ -169,4 +169,34 @@ class AuthServiceTest {
 
         assertThrows(IllegalArgumentException.class, () -> authService.getUserById("bad-id"));
     }
+
+
+    @Test
+    void testRegister_shortUsername_throwsException() {
+        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        req.setUsername("ab");
+        req.setEmail("short@example.com");
+        req.setPassword("password123");
+        assertThrows(Exception.class, () -> authService.register(req));
+    }
+
+    @Test
+    void testRegister_adminRole_assignedCorrectly() {
+        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        req.setUsername("adminuser");
+        req.setEmail("admin2@example.com");
+        req.setPassword("adminpass1");
+        req.setRole("ADMIN");
+        var response = authService.register(req);
+        assertEquals("ADMIN", response.getRole());
+    }
+
+    @Test
+    void testLogin_nonExistentEmail_throwsException() {
+        com.queuesmart.dto.AuthDto.LoginRequest req = new com.queuesmart.dto.AuthDto.LoginRequest();
+        req.setEmail("ghost@example.com");
+        req.setPassword("doesntmatter");
+        assertThrows(Exception.class, () -> authService.login(req));
+    }
+
 }
