@@ -199,4 +199,28 @@ class AuthServiceTest {
         assertThrows(Exception.class, () -> authService.login(req));
     }
 
+
+
+    @Test
+    void testRegister_returnsTokenInResponse() {
+        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        req.setUsername("tokencheck");
+        req.setEmail("tokencheck@example.com");
+        req.setPassword("securepass1");
+        var response = authService.register(req);
+        assertNotNull(response.getToken());
+        assertFalse(response.getToken().isEmpty());
+    }
+
+    @Test
+    void testRegister_usernameAndEmailStoredCorrectly() {
+        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        req.setUsername("storecheck");
+        req.setEmail("storecheck@example.com");
+        req.setPassword("securepass1");
+        var response = authService.register(req);
+        assertEquals("storecheck", response.getUsername());
+        assertEquals("storecheck@example.com", response.getEmail());
+    }
+
 }
