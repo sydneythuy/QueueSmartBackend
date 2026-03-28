@@ -86,4 +86,31 @@ class NotificationServiceTest {
         notificationService.markAsRead("notif-1");
         verify(notificationRepository).markAsRead("notif-1");
     }
+
+
+    @Test
+    void testMarkAllAsRead_marksAllNotificationsRead() {
+        notificationService.sendQueueJoined("user1", "Advising", 2);
+        notificationService.sendQueueJoined("user1", "Advising", 1);
+        notificationService.markAllAsRead("user1");
+        assertEquals(0, notificationService.getUnreadCount("user1"));
+    }
+
+    @Test
+    void testGetNotificationsByType_filtersCorrectly() {
+        notificationService.sendQueueJoined("user2", "Health", 1);
+        notificationService.sendQueueLeft("user2", "Health");
+        var joined = notificationService.getNotificationsByType("user2", "joined");
+        assertFalse(joined.isEmpty());
+        joined.forEach(n -> assertTrue(n.getMessage().toLowerCase().contains("joined")));
+    }
+
+    @Test
+    void testGetTotalNotificationCount_returnsCorrectCount() {
+        notificationService.sendQueueJoined("user3", "IT Support", 3);
+        notificationService.sendAlmostYourTurn("user3", "IT Support", 2);
+        notificationService.sendYourTurn("user3", "IT Support");
+        assertEquals(3, notificationService.getTotalNotificationCount("user3"));
+    }
+
 }
