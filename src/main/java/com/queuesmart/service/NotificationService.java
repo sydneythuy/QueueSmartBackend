@@ -71,4 +71,34 @@ public class NotificationService {
         log.info("[NOTIFICATION] userId={} type={} msg={}", userId, type, message);
         return notificationRepository.save(notification);
     }
+
+
+    /**
+     * Marks all notifications as read for a given user.
+     * Called when user opens the notification panel.
+     */
+    public void markAllAsRead(String userId) {
+        notificationRepository.findByUserId(userId).forEach(n -> {
+            n.setRead(true);
+            notificationRepository.save(n);
+        });
+    }
+
+    /**
+     * Filters notifications by keyword in message body.
+     * Useful for client-side type filtering (e.g. "joined", "served").
+     */
+    public java.util.List<com.queuesmart.model.Notification> getNotificationsByType(String userId, String keyword) {
+        return notificationRepository.findByUserId(userId).stream()
+                .filter(n -> n.getMessage().toLowerCase().contains(keyword.toLowerCase()))
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * Returns total notification count for a user.
+     */
+    public int getTotalNotificationCount(String userId) {
+        return notificationRepository.findByUserId(userId).size();
+    }
+
 }
