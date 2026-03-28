@@ -195,4 +195,46 @@ public class QueueService {
                 .build();
         historyRepository.save(record);
     }
+
+
+    /**
+     * Returns all active (WAITING) queue entries for a given user across all services.
+     * Useful for a "My Active Queues" dashboard view.
+     */
+    public java.util.List<QueueDto.QueueEntryResponse> getUserActiveQueues(String userId) {
+        return queueRepository.findByUserId(userId).stream()
+                .filter(e -> e.getStatus() == QueueEntry.QueueStatus.WAITING)
+                .map(QueueDto.QueueEntryResponse::new)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * Returns the current position of a user in a queue, or -1 if not found.
+     */
+    public int getUserPosition(String userId, String serviceId) {
+        java.util.List<QueueEntry> active = queueRepository.findActiveByServiceId(serviceId);
+        for (int i = 0; i < active.size(); i++) {
+            if (active.get(i).getUserId().equals(userId)) return i + 1;
+        }
+        return -1;
+    }
+
+    /**
+     * Returns summary statistics for a given service queue:
+     * total waiting, average wait, and position of given user.
+     */
+    public java.util.Map<String, Object> getQueueSummary(String serviceId) {
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        java.util.List<QueueEntry> active = queueRepository.findActiveByServiceId(serviceId);
+        double avgWait = active.stream()
+                .mapToInt(QueueEntry::getEstimatedWaitMinutes)
+                .average().orElse(0);
+        java.util.Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("serviceId", serviceId);
+        summary.put("serviceName", service.getName());
+        summary.put("totalWaiting", active.size());
+        summary.put("averageWaitMinutes", Math.round(avgWait));
+        return summary;
+    }
+
 }
