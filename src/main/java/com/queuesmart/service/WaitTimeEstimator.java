@@ -41,4 +41,27 @@ public class WaitTimeEstimator {
             case LOW    -> 1.0;
         };
     }
+
+
+    /**
+     * Estimates wait time with a custom multiplier override.
+     * Useful for services that have variable throughput at different times.
+     */
+    public int estimateWithMultiplier(int position, int durationMinutes, double customMultiplier) {
+        if (position <= 1) return 0;
+        double base = (double)(position - 1) * durationMinutes;
+        return (int) Math.ceil(base * customMultiplier);
+    }
+
+    /**
+     * Returns a human-readable wait time string, e.g. "~15 min" or "Less than 1 min".
+     */
+    public String getWaitLabel(int position, int durationMinutes,
+            com.queuesmart.model.Service.PriorityLevel priority) {
+        int minutes = estimate(position, durationMinutes, priority);
+        if (minutes == 0) return "You are next";
+        if (minutes < 1) return "Less than 1 min";
+        return "~" + minutes + " min";
+    }
+
 }
