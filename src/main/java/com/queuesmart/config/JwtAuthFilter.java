@@ -59,4 +59,28 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         filterChain.doFilter(request, response);
     }
+
+
+    /**
+     * Returns true if the request is to a public endpoint that does not require a token.
+     * Prevents unnecessary token parsing for unauthenticated routes.
+     */
+    private boolean isPublicEndpoint(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.startsWith("/api/auth/");
+    }
+
+    /**
+     * Writes a JSON 401 response when a token is present but invalid or expired.
+     * Provides a clear error message to the client instead of a silent filter pass-through.
+     */
+    private void writeUnauthorizedResponse(HttpServletResponse response, String message)
+            throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json");
+        response.getWriter().write(
+            "{"success":false,"message":"" + message + "","data":null}"
+        );
+    }
+
 }
