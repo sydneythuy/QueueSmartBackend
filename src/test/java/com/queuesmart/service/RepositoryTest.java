@@ -237,4 +237,43 @@ class RepositoryTest {
         assertEquals(2, repo.countByServiceId("svc-1"));
         assertEquals(1, repo.countByServiceId("svc-2"));
     }
+
+
+    @Test
+    void testHistoryRepository_saveAndFindByUserId() {
+        com.queuesmart.repository.HistoryRepository repo = new com.queuesmart.repository.HistoryRepository();
+        com.queuesmart.model.HistoryRecord r = new com.queuesmart.model.HistoryRecord();
+        r.setId("h1");
+        r.setUserId("userA");
+        r.setServiceName("Advising");
+        r.setFinalStatus(com.queuesmart.model.QueueEntry.QueueStatus.SERVED);
+        r.setWaitedMinutes(10);
+        r.setJoinedAt(java.time.LocalDateTime.now().minusMinutes(10));
+        r.setCompletedAt(java.time.LocalDateTime.now());
+        repo.save(r);
+        assertEquals(1, repo.findByUserId("userA").size());
+        assertEquals("Advising", repo.findByUserId("userA").get(0).getServiceName());
+    }
+
+    @Test
+    void testHistoryRepository_multipleUsers_isolatedResults() {
+        com.queuesmart.repository.HistoryRepository repo = new com.queuesmart.repository.HistoryRepository();
+        for (int i = 0; i < 3; i++) {
+            com.queuesmart.model.HistoryRecord r = new com.queuesmart.model.HistoryRecord();
+            r.setId("h-a-" + i);
+            r.setUserId("userA");
+            r.setJoinedAt(java.time.LocalDateTime.now());
+            r.setCompletedAt(java.time.LocalDateTime.now());
+            repo.save(r);
+        }
+        com.queuesmart.model.HistoryRecord other = new com.queuesmart.model.HistoryRecord();
+        other.setId("h-b-1");
+        other.setUserId("userB");
+        other.setJoinedAt(java.time.LocalDateTime.now());
+        other.setCompletedAt(java.time.LocalDateTime.now());
+        repo.save(other);
+        assertEquals(3, repo.findByUserId("userA").size());
+        assertEquals(1, repo.findByUserId("userB").size());
+    }
+
 }
