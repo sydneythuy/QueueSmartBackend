@@ -188,4 +188,37 @@ class QueueServiceTest {
         assertEquals(1, status.getTotalWaiting());
         assertEquals("Advising", status.getServiceName());
     }
+
+
+    @Test
+    void testGetUserActiveQueues_returnsOnlyWaitingEntries() {
+        // join queue and verify it appears in active queues
+        queueService.joinQueue(testUserId, testServiceId, null);
+        var active = queueService.getUserActiveQueues(testUserId);
+        assertFalse(active.isEmpty());
+        active.forEach(e -> assertEquals(testUserId, e.getUserId()));
+    }
+
+    @Test
+    void testGetUserPosition_returnsCorrectPosition() {
+        queueService.joinQueue(testUserId, testServiceId, null);
+        int pos = queueService.getUserPosition(testUserId, testServiceId);
+        assertEquals(1, pos);
+    }
+
+    @Test
+    void testGetUserPosition_userNotInQueue_returnsMinusOne() {
+        int pos = queueService.getUserPosition("nonexistent-user", testServiceId);
+        assertEquals(-1, pos);
+    }
+
+    @Test
+    void testGetQueueSummary_returnsCorrectFields() {
+        queueService.joinQueue(testUserId, testServiceId, null);
+        var summary = queueService.getQueueSummary(testServiceId);
+        assertTrue(summary.containsKey("totalWaiting"));
+        assertTrue(summary.containsKey("serviceName"));
+        assertEquals(1, summary.get("totalWaiting"));
+    }
+
 }
