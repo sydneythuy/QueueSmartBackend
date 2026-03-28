@@ -168,4 +168,56 @@ class AuthControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid email or password"));
     }
+
+
+    @Test
+    void testRegister_duplicateEmail_returns400() throws Exception {
+        com.queuesmart.dto.AuthDto.RegisterRequest req = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        req.setUsername("uniqueuser");
+        req.setEmail("dup@example.com");
+        req.setPassword("password123");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/api/auth/register")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+
+        com.queuesmart.dto.AuthDto.RegisterRequest dup = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        dup.setUsername("otherusername");
+        dup.setEmail("dup@example.com");
+        dup.setPassword("password456");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/api/auth/register")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(dup)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void testLogin_wrongPassword_returnsFailure() throws Exception {
+        com.queuesmart.dto.AuthDto.RegisterRequest reg = new com.queuesmart.dto.AuthDto.RegisterRequest();
+        reg.setUsername("logintest");
+        reg.setEmail("logintest@example.com");
+        reg.setPassword("correctpassword");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/api/auth/register")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(reg)));
+
+        com.queuesmart.dto.AuthDto.LoginRequest login = new com.queuesmart.dto.AuthDto.LoginRequest();
+        login.setEmail("logintest@example.com");
+        login.setPassword("wrongpassword");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/api/auth/login")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(login)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.success").value(false));
+    }
+
 }
