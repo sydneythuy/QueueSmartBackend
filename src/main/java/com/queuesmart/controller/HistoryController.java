@@ -55,4 +55,33 @@ public class HistoryController {
         );
         return ResponseEntity.ok(ApiResponse.success("Stats retrieved", stats));
     }
+
+
+    /**
+     * GET /api/history/recent?limit=5
+     * Returns the N most recent history entries for the authenticated user.
+     */
+    @org.springframework.web.bind.annotation.GetMapping("/recent")
+    public org.springframework.http.ResponseEntity<com.queuesmart.dto.ApiResponse<java.util.List<com.queuesmart.model.HistoryRecord>>> getRecentHistory(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "5") int limit,
+            org.springframework.security.core.Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        return org.springframework.http.ResponseEntity.ok(
+                com.queuesmart.dto.ApiResponse.success("Recent history",
+                        historyService.getRecentHistory(userId, limit)));
+    }
+
+    /**
+     * GET /api/history/count
+     * Returns the total number of queue visits for the authenticated user.
+     */
+    @org.springframework.web.bind.annotation.GetMapping("/count")
+    public org.springframework.http.ResponseEntity<com.queuesmart.dto.ApiResponse<Long>> getHistoryCount(
+            org.springframework.security.core.Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        return org.springframework.http.ResponseEntity.ok(
+                com.queuesmart.dto.ApiResponse.success("History count",
+                        historyService.countUserHistory(userId)));
+    }
+
 }
