@@ -1,218 +1,112 @@
 package com.queuesmart.service;
 
-import com.queuesmart.dto.QueueDto;
-import com.queuesmart.model.*;
-import com.queuesmart.repository.*;
+import com.queuesmart.dto.ServiceDto;
+import com.queuesmart.model.Queue;
+import com.queuesmart.model.Service;
+import com.queuesmart.repository.QueueEntryRepository;
+import com.queuesmart.repository.QueueRepository;
+import com.queuesmart.repository.ServiceRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-@Service
+@org.springframework.stereotype.Service
 @RequiredArgsConstructor
-public class QueueService {
+public class ServiceManagementService {
 
-    private final QueueRepository          queueRepository;
-    private final QueueEntryRepository     entryRepository;
-    private final UserCredentialRepository credentialRepository;
-    private final ServiceManagementService serviceManagementService;
-    private final WaitTimeEstimator        waitTimeEstimator;
-    private final NotificationService      notificationService;
-    private final HistoryRecordRepository  historyRepo;
-    private final UserProfileRepository    profileRepository;
+    private final ServiceRepository    serviceRepository;
+    private final QueueRepository      queueRepository;
+    private final QueueEntryRepository queueEntryRepository;
 
     @Transactional
-    public QueueDto.QueueEntryResponse joinQueue(String userId, String serviceId,
-                                                  com.queuesmart.model.Service.PriorityLevel priority) {
-        UserCredential user = credentialRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+    public ServiceDto.ServiceResponse createService(ServiceDto.CreateServiceRequest req, String adminId) {
+        if (serviceRepository.existsByNameIgnoreCase(req.getName())) {
+            throw new IllegalArgumentException("A service with that name already exists");
+        }
 
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        if (!service.isActive()) throw new IllegalArgumentException("This service is currently not active");
-
-        Queue queue = queueRepository.findByServiceId(serviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Queue not found for this service"));
-
-        if (queue.getStatus() == Queue.QueueStatus.CLOSED)
-            throw new IllegalArgumentException("This queue is currently closed");
-
-        // Prevent duplicate active entries
-        entryRepository.findByQueue_IdAndUser_IdAndStatus(queue.getId(), userId,
-                QueueEntry.EntryStatus.WAITING)
-                .ifPresent(e -> { throw new IllegalArgumentException("You are already in this queue"); });
-
-        com.queuesmart.model.Service.PriorityLevel effectivePriority = priority != null ? priority : service.getPriorityLevel();
-
-        List<QueueEntry> activeEntries = entryRepository.findActiveByQueueIdOrdered(queue.getId());
-        int position = activeEntries.size() + 1;
-        int wait = waitTimeEstimator.estimate(position, service.getExpectedDurationMinutes(), effectivePriority);
-
-        QueueEntry entry = QueueEntry.builder()
+        Service service = Service.builder()
                 .id(UUID.randomUUID().toString())
-                .queue(queue)
-                .user(user)
-                .position(position)
-                .joinedAt(LocalDateTime.now())
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(effectivePriority)
-                .estimatedWaitMinutes(wait)
+                .name(req.getName())
+                .description(req.getDescription())
+                .expectedDurationMinutes(req.getExpectedDurationMinutes())
+                .priorityLevel(req.getPriorityLevel())
+                .createdByAdminId(adminId)
+                .active(true)
                 .build();
-        entryRepository.save(entry);
+        serviceRepository.save(service);
 
-        notificationService.sendQueueJoined(userId, service.getName(), position);
-        return toResponse(entry, usernameOf(user));
+        // Create a corresponding open Queue row immediately
+        Queue queue = Queue.builder()
+                .id(UUID.randomUUID().toString())
+                .service(service)
+                .status(Queue.QueueStatus.OPEN)
+                .build();
+        queueRepository.save(queue);
+
+        return toResponse(service);
     }
 
     @Transactional
-    public void leaveQueue(String userId, String serviceId) {
-        Queue queue = queueRepository.findByServiceId(serviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+    public ServiceDto.ServiceResponse updateService(String id, ServiceDto.UpdateServiceRequest req, String adminId) {
+        Service service = serviceRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Service not found"));
 
-        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
-                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
-                .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
+        if (req.getName() != null && !req.getName().equalsIgnoreCase(service.getName())) {
+            if (serviceRepository.existsByNameIgnoreCase(req.getName())) {
+                throw new IllegalArgumentException("A service with that name already exists");
+            }
+            service.setName(req.getName());
+        }
+        if (req.getDescription() != null)           service.setDescription(req.getDescription());
+        if (req.getExpectedDurationMinutes() != null)
+            service.setExpectedDurationMinutes(req.getExpectedDurationMinutes());
+        if (req.getPriorityLevel() != null)          service.setPriorityLevel(req.getPriorityLevel());
+        if (req.getActive() != null)                 service.setActive(req.getActive());
 
-        entry.setStatus(QueueEntry.EntryStatus.LEFT);
-        entryRepository.save(entry);
-
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        saveHistory(entry, service, QueueEntry.EntryStatus.LEFT);
-        notificationService.sendQueueLeft(userId, service.getName());
-        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
+        serviceRepository.save(service);
+        return toResponse(service);
     }
 
     @Transactional(readOnly = true)
-    public QueueDto.QueueStatusResponse getQueueStatus(String serviceId) {
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        Queue queue = queueRepository.findByServiceId(serviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
-
-        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
-        for (int i = 0; i < active.size(); i++) {
-            QueueEntry e = active.get(i);
-            e.setPosition(i + 1);
-            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
-                    i + 1, service.getExpectedDurationMinutes(), e.getPriorityLevel()));
-        }
-
-        QueueDto.QueueStatusResponse resp = new QueueDto.QueueStatusResponse();
-        resp.setServiceId(serviceId);
-        resp.setServiceName(service.getName());
-        resp.setTotalWaiting(active.size());
-        resp.setEstimatedWaitForNew(
-                waitTimeEstimator.estimateForNewUser(active.size(), service.getExpectedDurationMinutes()));
-        resp.setEntries(active.stream()
-                .map(e -> toResponse(e, usernameOf(e.getUser())))
-                .collect(Collectors.toList()));
-        return resp;
-    }
-
-    @Transactional
-    public QueueDto.QueueEntryResponse serveNext(String serviceId) {
-        Queue queue = queueRepository.findByServiceId(serviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
-
-        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
-        if (active.isEmpty()) throw new IllegalArgumentException("Queue is empty");
-
-        QueueEntry next = active.get(0);
-        next.setStatus(QueueEntry.EntryStatus.SERVED);
-        entryRepository.save(next);
-
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        saveHistory(next, service, QueueEntry.EntryStatus.SERVED);
-        notificationService.sendYourTurn(next.getUser().getId(), service.getName());
-
-        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
-
-        // Notify new first-in-line if they're almost up
-        List<QueueEntry> remaining = entryRepository.findActiveByQueueIdOrdered(queue.getId());
-        if (!remaining.isEmpty() && remaining.get(0).getPosition() <= 2) {
-            QueueEntry almostNext = remaining.get(0);
-            notificationService.sendAlmostYourTurn(
-                    almostNext.getUser().getId(), service.getName(), almostNext.getPosition());
-        }
-        return toResponse(next, usernameOf(next.getUser()));
+    public List<ServiceDto.ServiceResponse> getAllServices() {
+        return serviceRepository.findAll().stream().map(this::toResponse).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public QueueDto.QueueEntryResponse getUserQueueEntry(String userId, String serviceId) {
-        Queue queue = queueRepository.findByServiceId(serviceId)
-                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
-
-        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
-                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
-                .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
-
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
-        int pos = active.indexOf(entry) + 1;
-        entry.setPosition(pos);
-        entry.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
-                pos, service.getExpectedDurationMinutes(), entry.getPriorityLevel()));
-
-        return toResponse(entry, usernameOf(entry.getUser()));
+    public List<ServiceDto.ServiceResponse> getActiveServices() {
+        return serviceRepository.findAllByActiveTrue().stream().map(this::toResponse).collect(Collectors.toList());
     }
 
-    // ── private helpers ───────────────────────────────────────
+    @Transactional(readOnly = true)
+    public ServiceDto.ServiceResponse getServiceById(String id) {
+        return toResponse(serviceRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Service not found")));
+    }
 
     @Transactional
-    protected void recalculatePositions(String queueId, int durationMinutes) {
-        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queueId);
-        for (int i = 0; i < active.size(); i++) {
-            QueueEntry e = active.get(i);
-            e.setPosition(i + 1);
-            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
-                    i + 1, durationMinutes, e.getPriorityLevel()));
-            entryRepository.save(e);
-        }
+    public void deleteService(String id) {
+        if (!serviceRepository.existsById(id)) throw new IllegalArgumentException("Service not found");
+        serviceRepository.deleteById(id);
     }
 
-    private void saveHistory(QueueEntry entry, com.queuesmart.model.Service service,
-                             QueueEntry.EntryStatus status) {
-        long waited = ChronoUnit.MINUTES.between(entry.getJoinedAt(), LocalDateTime.now());
-        HistoryRecord record = HistoryRecord.builder()
-                .id(UUID.randomUUID().toString())
-                .user(entry.getUser())
-                .serviceId(service.getId())
-                .serviceName(service.getName())
-                .joinedAt(entry.getJoinedAt())
-                .completedAt(LocalDateTime.now())
-                .finalStatus(status)
-                .waitedMinutes((int) Math.max(0, waited))
-                .build();
-        historyRepo.save(record);
+    // ── internal helper used by QueueService ──────────────────
+    @Transactional(readOnly = true)
+    public Service getRawService(String serviceId) {
+        return serviceRepository.findById(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Service not found"));
     }
 
-    private String usernameOf(UserCredential user) {
-        return profileRepository.findByCredentialId(user.getId())
-                .map(UserProfile::getUsername)
-                .orElse(user.getEmail());
-    }
-
-    private QueueDto.QueueEntryResponse toResponse(QueueEntry e, String username) {
-        QueueDto.QueueEntryResponse r = new QueueDto.QueueEntryResponse();
-        r.setId(e.getId());
-        r.setUserId(e.getUser().getId());
-        r.setUsername(username);
-        r.setServiceId(e.getQueue().getService().getId());
-        r.setPosition(e.getPosition());
-        r.setEstimatedWaitMinutes(e.getEstimatedWaitMinutes());
-        r.setJoinedAt(e.getJoinedAt());
-        r.setStatus(e.getStatus());
-        r.setPriorityLevel(e.getPriorityLevel());
-        return r;
+    // ── private ───────────────────────────────────────────────
+    private ServiceDto.ServiceResponse toResponse(Service s) {
+        int queueSize = queueRepository.findByServiceId(s.getId())
+                .map(q -> (int) queueEntryRepository.countByQueueIdAndStatus(
+                        q.getId(), com.queuesmart.model.QueueEntry.EntryStatus.WAITING))
+                .orElse(0);
+        return new ServiceDto.ServiceResponse(s, queueSize);
     }
 }
-
-
-
-
-
 
 
