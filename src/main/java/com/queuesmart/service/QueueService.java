@@ -28,7 +28,7 @@ public class QueueService {
 
     @Transactional
     public QueueDto.QueueEntryResponse joinQueue(String userId, String serviceId,
-                                                  Service.PriorityLevel priority) {
+                                                  com.queuesmart.model.Service.PriorityLevel priority) {
         UserCredential user = credentialRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
@@ -42,11 +42,11 @@ public class QueueService {
             throw new IllegalArgumentException("This queue is currently closed");
 
         // Prevent duplicate active entries
-        entryRepository.findByQueueIdAndUserIdAndStatus(queue.getId(), userId,
+        entryRepository.findByQueue_IdAndUser_IdAndStatus(queue.getId(), userId,
                 QueueEntry.EntryStatus.WAITING)
                 .ifPresent(e -> { throw new IllegalArgumentException("You are already in this queue"); });
 
-        Service.PriorityLevel effectivePriority = priority != null ? priority : service.getPriorityLevel();
+        com.queuesmart.model.Service.PriorityLevel effectivePriority = priority != null ? priority : service.getPriorityLevel();
 
         List<QueueEntry> activeEntries = entryRepository.findActiveByQueueIdOrdered(queue.getId());
         int position = activeEntries.size() + 1;
@@ -73,7 +73,7 @@ public class QueueService {
         Queue queue = queueRepository.findByServiceId(serviceId)
                 .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
 
-        QueueEntry entry = entryRepository.findByQueueIdAndUserIdAndStatus(
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
                         queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
                 .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
 
@@ -145,7 +145,7 @@ public class QueueService {
         Queue queue = queueRepository.findByServiceId(serviceId)
                 .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
 
-        QueueEntry entry = entryRepository.findByQueueIdAndUserIdAndStatus(
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
                         queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
                 .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
 
