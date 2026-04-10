@@ -1,291 +1,217 @@
-package com.queuesmart.repository;
+package com.queuesmart.service;
 
+import com.queuesmart.dto.QueueDto;
 import com.queuesmart.model.*;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.test.context.ActiveProfiles;
+import com.queuesmart.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.*;
+@Service
+@RequiredArgsConstructor
+public class QueueService {
 
-/**
- * Integration tests for Spring Data JPA repositories.
- * Uses H2 in-memory database (no real MySQL required).
- * Schema is auto-created from @Entity classes via ddl-auto=create-drop.
- */
-@DataJpaTest
-@ActiveProfiles("test")
-class RepositoryIntegrationTest {
+    private final QueueRepository          queueRepository;
+    private final QueueEntryRepository     entryRepository;
+    private final UserCredentialRepository credentialRepository;
+    private final ServiceManagementService serviceManagementService;
+    private final WaitTimeEstimator        waitTimeEstimator;
+    private final NotificationService      notificationService;
+    private final HistoryRecordRepository  historyRepo;
+    private final UserProfileRepository    profileRepository;
 
-    @Autowired private UserCredentialRepository credentialRepo;
-    @Autowired private UserProfileRepository    profileRepo;
-    @Autowired private ServiceRepository        serviceRepo;
-    @Autowired private QueueRepository          queueRepo;
-    @Autowired private QueueEntryRepository     entryRepo;
-    @Autowired private NotificationRepository   notifRepo;
-    @Autowired private HistoryRecordRepository  historyRepo;
+    @Transactional
+    public QueueDto.QueueEntryResponse joinQueue(String userId, String serviceId,
+                                                  com.queuesmart.model.Service.PriorityLevel priority) {
+        UserCredential user = credentialRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-    private UserCredential savedUser;
-    private Service        savedService;
-    private Queue          savedQueue;
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        if (!service.isActive()) throw new IllegalArgumentException("This service is currently not active");
 
-    @BeforeEach
-    void setUp() {
-        // Clean slate
-        entryRepo.deleteAll();
-        historyRepo.deleteAll();
-        notifRepo.deleteAll();
-        queueRepo.deleteAll();
-        serviceRepo.deleteAll();
-        profileRepo.deleteAll();
-        credentialRepo.deleteAll();
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found for this service"));
 
-        savedUser = credentialRepo.save(UserCredential.builder()
-                .id("u1").email("alice@example.com")
-                .password("$2a$hashed").role(UserCredential.Role.USER).build());
+        if (queue.getStatus() == Queue.QueueStatus.CLOSED)
+            throw new IllegalArgumentException("This queue is currently closed");
 
-        savedService = serviceRepo.save(Service.builder()
-                .id("s1").name("Advising").description("Academic advising")
-                .expectedDurationMinutes(15).priorityLevel(Service.PriorityLevel.MEDIUM)
-                .active(true).build());
+        // Prevent duplicate active entries
+        entryRepository.findByQueue_IdAndUser_IdAndStatus(queue.getId(), userId,
+                QueueEntry.EntryStatus.WAITING)
+                .ifPresent(e -> { throw new IllegalArgumentException("You are already in this queue"); });
 
-        savedQueue = queueRepo.save(Queue.builder()
-                .id("q1").service(savedService).status(Queue.QueueStatus.OPEN).build());
-    }
+        com.queuesmart.model.Service.PriorityLevel effectivePriority = priority != null ? priority : service.getPriorityLevel();
 
-    // ── UserCredentialRepository ──────────────────────────────
+        List<QueueEntry> activeEntries = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        int position = activeEntries.size() + 1;
+        int wait = waitTimeEstimator.estimate(position, service.getExpectedDurationMinutes(), effectivePriority);
 
-    @Test
-    void credential_FindByEmail_ReturnsUser() {
-        assertTrue(credentialRepo.findByEmail("alice@example.com").isPresent());
-        assertFalse(credentialRepo.findByEmail("other@example.com").isPresent());
-    }
-
-    @Test
-    void credential_ExistsByEmail_ReturnsTrue() {
-        assertTrue(credentialRepo.existsByEmail("alice@example.com"));
-        assertFalse(credentialRepo.existsByEmail("nope@example.com"));
-    }
-
-    @Test
-    void credential_DuplicateEmail_ThrowsDataIntegrityViolation() {
-        // unique constraint on email
-        assertThrows(Exception.class, () ->
-                credentialRepo.saveAndFlush(UserCredential.builder()
-                        .id("u2").email("alice@example.com")
-                        .password("hashed").role(UserCredential.Role.USER).build()));
-    }
-
-    // ── UserProfileRepository ─────────────────────────────────
-
-    @Test
-    void profile_SaveAndFindByCredentialId() {
-        profileRepo.save(UserProfile.builder()
-                .id("p1").credential(savedUser).username("alice")
-                .emailVerified(false).build());
-
-        assertTrue(profileRepo.findByCredentialId("u1").isPresent());
-        assertEquals("alice", profileRepo.findByCredentialId("u1").get().getUsername());
-    }
-
-    @Test
-    void profile_ExistsByUsername_CaseSensitive() {
-        profileRepo.save(UserProfile.builder()
-                .id("p1").credential(savedUser).username("Alice")
-                .emailVerified(false).build());
-
-        assertTrue(profileRepo.existsByUsername("Alice"));
-        assertFalse(profileRepo.existsByUsername("alice")); // case-sensitive in H2
-    }
-
-    // ── ServiceRepository ─────────────────────────────────────
-
-    @Test
-    void service_FindAllByActiveTrue_FiltersInactive() {
-        serviceRepo.save(Service.builder()
-                .id("s2").name("IT Support").description("IT help")
-                .expectedDurationMinutes(10).priorityLevel(Service.PriorityLevel.LOW)
-                .active(false).build());
-
-        List<Service> active = serviceRepo.findAllByActiveTrue();
-        assertEquals(1, active.size());
-        assertEquals("Advising", active.get(0).getName());
-    }
-
-    @Test
-    void service_ExistsByNameIgnoreCase_ReturnsTrue() {
-        assertTrue(serviceRepo.existsByNameIgnoreCase("advising"));
-        assertTrue(serviceRepo.existsByNameIgnoreCase("ADVISING"));
-        assertFalse(serviceRepo.existsByNameIgnoreCase("Clinic"));
-    }
-
-    // ── QueueRepository ───────────────────────────────────────
-
-    @Test
-    void queue_FindByServiceId_ReturnsQueue() {
-        assertTrue(queueRepo.findByServiceId("s1").isPresent());
-        assertFalse(queueRepo.findByServiceId("bad").isPresent());
-    }
-
-    // ── QueueEntryRepository ──────────────────────────────────
-
-    @Test
-    void entry_FindActiveByQueueIdOrdered_ReturnsOnlyWaiting() {
-        entryRepo.save(QueueEntry.builder()
-                .id("e1").queue(savedQueue).user(savedUser)
-                .position(1).joinedAt(LocalDateTime.now())
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(Service.PriorityLevel.MEDIUM).build());
-        entryRepo.save(QueueEntry.builder()
-                .id("e2").queue(savedQueue).user(savedUser)
-                .position(2).joinedAt(LocalDateTime.now())
-                .status(QueueEntry.EntryStatus.SERVED)
-                .priorityLevel(Service.PriorityLevel.MEDIUM).build());
-
-        List<QueueEntry> active = entryRepo.findActiveByQueueIdOrdered("q1");
-        assertEquals(1, active.size());
-        assertEquals("e1", active.get(0).getId());
-    }
-
-    @Test
-    void entry_PriorityOrdering_HighBeforeLow() {
-        // Create a second user for this test
-        UserCredential user2 = credentialRepo.save(UserCredential.builder()
-                .id("u2").email("bob@example.com")
-                .password("hashed").role(UserCredential.Role.USER).build());
-
-        LocalDateTime now = LocalDateTime.now();
-
-        entryRepo.save(QueueEntry.builder()
-                .id("e-low").queue(savedQueue).user(savedUser)
-                .position(1).joinedAt(now)
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(Service.PriorityLevel.LOW).build());
-
-        entryRepo.save(QueueEntry.builder()
-                .id("e-high").queue(savedQueue).user(user2)
-                .position(2).joinedAt(now.plusSeconds(1))
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(Service.PriorityLevel.HIGH).build());
-
-        List<QueueEntry> ordered = entryRepo.findActiveByQueueIdOrdered("q1");
-        assertEquals("e-high", ordered.get(0).getId()); // HIGH comes first
-        assertEquals("e-low",  ordered.get(1).getId());
-    }
-
-    @Test
-    void entry_CountByQueueIdAndStatus_IsCorrect() {
-        entryRepo.save(QueueEntry.builder()
-                .id("e1").queue(savedQueue).user(savedUser)
-                .position(1).joinedAt(LocalDateTime.now())
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(Service.PriorityLevel.MEDIUM).build());
-
-        assertEquals(1, entryRepo.countByQueueIdAndStatus("q1", QueueEntry.EntryStatus.WAITING));
-        assertEquals(0, entryRepo.countByQueueIdAndStatus("q1", QueueEntry.EntryStatus.SERVED));
-    }
-
-    @Test
-    void entry_FindByQueueIdAndUserIdAndStatus_ReturnsCorrectEntry() {
-        entryRepo.save(QueueEntry.builder()
-                .id("e1").queue(savedQueue).user(savedUser)
-                .position(1).joinedAt(LocalDateTime.now())
-                .status(QueueEntry.EntryStatus.WAITING)
-                .priorityLevel(Service.PriorityLevel.MEDIUM).build());
-
-        assertTrue(entryRepo.findByQueueIdAndUserIdAndStatus("q1", "u1",
-                QueueEntry.EntryStatus.WAITING).isPresent());
-        assertFalse(entryRepo.findByQueueIdAndUserIdAndStatus("q1", "u1",
-                QueueEntry.EntryStatus.SERVED).isPresent());
-    }
-
-    // ── NotificationRepository ────────────────────────────────
-
-    @Test
-    void notification_FindUnreadByUserId_FiltersReadOnes() {
-        notifRepo.save(Notification.builder()
-                .id("n1").user(savedUser).message("Hello").read(false)
-                .type(Notification.NotificationType.QUEUE_JOINED).build());
-        notifRepo.save(Notification.builder()
-                .id("n2").user(savedUser).message("Done").read(true)
-                .type(Notification.NotificationType.YOUR_TURN).build());
-
-        List<Notification> unread = notifRepo.findByUserIdAndReadFalseOrderByCreatedAtDesc("u1");
-        assertEquals(1, unread.size());
-        assertEquals("n1", unread.get(0).getId());
-    }
-
-    @Test
-    void notification_CountUnread_IsCorrect() {
-        notifRepo.save(Notification.builder()
-                .id("n1").user(savedUser).message("A").read(false)
-                .type(Notification.NotificationType.QUEUE_JOINED).build());
-        notifRepo.save(Notification.builder()
-                .id("n2").user(savedUser).message("B").read(false)
-                .type(Notification.NotificationType.ALMOST_YOUR_TURN).build());
-        notifRepo.save(Notification.builder()
-                .id("n3").user(savedUser).message("C").read(true)
-                .type(Notification.NotificationType.YOUR_TURN).build());
-
-        assertEquals(2, notifRepo.countByUserIdAndReadFalse("u1"));
-    }
-
-    // ── HistoryRecordRepository ───────────────────────────────
-
-    @Test
-    void history_FindByUserId_ReturnsMostRecentFirst() {
-        historyRepo.save(HistoryRecord.builder()
-                .id("h1").user(savedUser).serviceName("Advising")
-                .joinedAt(LocalDateTime.now().minusHours(2))
-                .finalStatus(QueueEntry.EntryStatus.SERVED).waitedMinutes(10).build());
-        historyRepo.save(HistoryRecord.builder()
-                .id("h2").user(savedUser).serviceName("Clinic")
-                .joinedAt(LocalDateTime.now().minusHours(1))
-                .finalStatus(QueueEntry.EntryStatus.LEFT).waitedMinutes(5).build());
-
-        List<HistoryRecord> records = historyRepo.findByUserIdOrderByJoinedAtDesc("u1");
-        assertEquals(2, records.size());
-        assertEquals("h2", records.get(0).getId()); // most recent first
-    }
-
-    @Test
-    void history_CountByFinalStatus_IsCorrect() {
-        historyRepo.save(HistoryRecord.builder()
-                .id("h1").user(savedUser).serviceName("A")
+        QueueEntry entry = QueueEntry.builder()
+                .id(UUID.randomUUID().toString())
+                .queue(queue)
+                .user(user)
+                .position(position)
                 .joinedAt(LocalDateTime.now())
-                .finalStatus(QueueEntry.EntryStatus.SERVED).waitedMinutes(5).build());
-        historyRepo.save(HistoryRecord.builder()
-                .id("h2").user(savedUser).serviceName("B")
-                .joinedAt(LocalDateTime.now())
-                .finalStatus(QueueEntry.EntryStatus.LEFT).waitedMinutes(3).build());
+                .status(QueueEntry.EntryStatus.WAITING)
+                .priorityLevel(effectivePriority)
+                .estimatedWaitMinutes(wait)
+                .build();
+        entryRepository.save(entry);
 
-        assertEquals(1, historyRepo.countByFinalStatus(QueueEntry.EntryStatus.SERVED));
-        assertEquals(1, historyRepo.countByFinalStatus(QueueEntry.EntryStatus.LEFT));
+        notificationService.sendQueueJoined(userId, service.getName(), position);
+        return toResponse(entry, usernameOf(user));
     }
 
-    @Test
-    void history_GroupedStats_ReturnCorrectCounts() {
-        historyRepo.save(HistoryRecord.builder().id("h1").user(savedUser)
-                .serviceName("Advising").joinedAt(LocalDateTime.now())
-                .finalStatus(QueueEntry.EntryStatus.SERVED).waitedMinutes(10).build());
-        historyRepo.save(HistoryRecord.builder().id("h2").user(savedUser)
-                .serviceName("Advising").joinedAt(LocalDateTime.now())
-                .finalStatus(QueueEntry.EntryStatus.SERVED).waitedMinutes(20).build());
-        historyRepo.save(HistoryRecord.builder().id("h3").user(savedUser)
-                .serviceName("Clinic").joinedAt(LocalDateTime.now())
-                .finalStatus(QueueEntry.EntryStatus.LEFT).waitedMinutes(5).build());
+    @Transactional
+    public void leaveQueue(String userId, String serviceId) {
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
 
-        List<Object[]> counts = historyRepo.countGroupedByServiceName();
-        assertEquals(2, counts.size()); // 2 distinct service names
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
+                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
+                .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
 
-        List<Object[]> avgs = historyRepo.avgWaitGroupedByServiceName();
-        assertEquals(2, avgs.size());
+        entry.setStatus(QueueEntry.EntryStatus.LEFT);
+        entryRepository.save(entry);
+
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        saveHistory(entry, service, QueueEntry.EntryStatus.LEFT);
+        notificationService.sendQueueLeft(userId, service.getName());
+        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
+    }
+
+    @Transactional(readOnly = true)
+    public QueueDto.QueueStatusResponse getQueueStatus(String serviceId) {
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        for (int i = 0; i < active.size(); i++) {
+            QueueEntry e = active.get(i);
+            e.setPosition(i + 1);
+            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                    i + 1, service.getExpectedDurationMinutes(), e.getPriorityLevel()));
+        }
+
+        QueueDto.QueueStatusResponse resp = new QueueDto.QueueStatusResponse();
+        resp.setServiceId(serviceId);
+        resp.setServiceName(service.getName());
+        resp.setTotalWaiting(active.size());
+        resp.setEstimatedWaitForNew(
+                waitTimeEstimator.estimateForNewUser(active.size(), service.getExpectedDurationMinutes()));
+        resp.setEntries(active.stream()
+                .map(e -> toResponse(e, usernameOf(e.getUser())))
+                .collect(Collectors.toList()));
+        return resp;
+    }
+
+    @Transactional
+    public QueueDto.QueueEntryResponse serveNext(String serviceId) {
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        if (active.isEmpty()) throw new IllegalArgumentException("Queue is empty");
+
+        QueueEntry next = active.get(0);
+        next.setStatus(QueueEntry.EntryStatus.SERVED);
+        entryRepository.save(next);
+
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        saveHistory(next, service, QueueEntry.EntryStatus.SERVED);
+        notificationService.sendYourTurn(next.getUser().getId(), service.getName());
+
+        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
+
+        // Notify new first-in-line if they're almost up
+        List<QueueEntry> remaining = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        if (!remaining.isEmpty() && remaining.get(0).getPosition() <= 2) {
+            QueueEntry almostNext = remaining.get(0);
+            notificationService.sendAlmostYourTurn(
+                    almostNext.getUser().getId(), service.getName(), almostNext.getPosition());
+        }
+        return toResponse(next, usernameOf(next.getUser()));
+    }
+
+    @Transactional(readOnly = true)
+    public QueueDto.QueueEntryResponse getUserQueueEntry(String userId, String serviceId) {
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
+                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
+                .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
+
+        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        int pos = active.indexOf(entry) + 1;
+        entry.setPosition(pos);
+        entry.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                pos, service.getExpectedDurationMinutes(), entry.getPriorityLevel()));
+
+        return toResponse(entry, usernameOf(entry.getUser()));
+    }
+
+    // ── private helpers ───────────────────────────────────────
+
+    @Transactional
+    protected void recalculatePositions(String queueId, int durationMinutes) {
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queueId);
+        for (int i = 0; i < active.size(); i++) {
+            QueueEntry e = active.get(i);
+            e.setPosition(i + 1);
+            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                    i + 1, durationMinutes, e.getPriorityLevel()));
+            entryRepository.save(e);
+        }
+    }
+
+    private void saveHistory(QueueEntry entry, com.queuesmart.model.Service service,
+                             QueueEntry.EntryStatus status) {
+        long waited = ChronoUnit.MINUTES.between(entry.getJoinedAt(), LocalDateTime.now());
+        HistoryRecord record = HistoryRecord.builder()
+                .id(UUID.randomUUID().toString())
+                .user(entry.getUser())
+                .serviceId(service.getId())
+                .serviceName(service.getName())
+                .joinedAt(entry.getJoinedAt())
+                .completedAt(LocalDateTime.now())
+                .finalStatus(status)
+                .waitedMinutes((int) Math.max(0, waited))
+                .build();
+        historyRepo.save(record);
+    }
+
+    private String usernameOf(UserCredential user) {
+        return profileRepository.findByCredentialId(user.getId())
+                .map(UserProfile::getUsername)
+                .orElse(user.getEmail());
+    }
+
+    private QueueDto.QueueEntryResponse toResponse(QueueEntry e, String username) {
+        QueueDto.QueueEntryResponse r = new QueueDto.QueueEntryResponse();
+        r.setId(e.getId());
+        r.setUserId(e.getUser().getId());
+        r.setUsername(username);
+        r.setServiceId(e.getQueue().getService().getId());
+        r.setPosition(e.getPosition());
+        r.setEstimatedWaitMinutes(e.getEstimatedWaitMinutes());
+        r.setJoinedAt(e.getJoinedAt());
+        r.setStatus(e.getStatus());
+        r.setPriorityLevel(e.getPriorityLevel());
+        return r;
     }
 }
+
+
+
 
 
 
