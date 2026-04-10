@@ -1,12 +1,14 @@
 package com.queuesmart.service;
 
 import com.queuesmart.model.Notification;
+import com.queuesmart.model.UserCredential;
 import com.queuesmart.repository.NotificationRepository;
+import com.queuesmart.repository.UserCredentialRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,90 +17,74 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class NotificationService {
 
-    private final NotificationRepository notificationRepository;
+    private final NotificationRepository  notificationRepository;
+    private final UserCredentialRepository credentialRepository;
 
+    @Transactional
     public Notification sendQueueJoined(String userId, String serviceName, int position) {
-        String message = String.format("You have joined the queue for %s. Your position: #%d", serviceName, position);
-        return save(userId, message, Notification.NotificationType.QUEUE_JOINED);
+        return save(userId,
+                String.format("You joined the queue for %s. Your position: #%d", serviceName, position),
+                Notification.NotificationType.QUEUE_JOINED);
     }
 
+    @Transactional
     public Notification sendAlmostYourTurn(String userId, String serviceName, int position) {
-        String message = String.format("Almost your turn for %s — you are now #%d in queue!", serviceName, position);
-        return save(userId, message, Notification.NotificationType.ALMOST_YOUR_TURN);
+        return save(userId,
+                String.format("Almost your turn for %s — you are now #%d!", serviceName, position),
+                Notification.NotificationType.ALMOST_YOUR_TURN);
     }
 
+    @Transactional
     public Notification sendYourTurn(String userId, String serviceName) {
-        String message = String.format("It's your turn! Please proceed to %s.", serviceName);
-        return save(userId, message, Notification.NotificationType.YOUR_TURN);
+        return save(userId,
+                String.format("It's your turn! Please proceed to %s.", serviceName),
+                Notification.NotificationType.YOUR_TURN);
     }
 
+    @Transactional
     public Notification sendQueueLeft(String userId, String serviceName) {
-        String message = String.format("You have left the queue for %s.", serviceName);
-        return save(userId, message, Notification.NotificationType.QUEUE_LEFT);
+        return save(userId,
+                String.format("You have left the queue for %s.", serviceName),
+                Notification.NotificationType.QUEUE_LEFT);
     }
 
-    public Notification sendStatusChanged(String userId, String serviceName, String status) {
-        String message = String.format("Queue status for %s has changed: %s", serviceName, status);
-        return save(userId, message, Notification.NotificationType.QUEUE_STATUS_CHANGED);
-    }
-
+    @Transactional(readOnly = true)
     public List<Notification> getNotificationsForUser(String userId) {
-        return notificationRepository.findByUserId(userId);
+        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId);
     }
 
+    @Transactional(readOnly = true)
     public List<Notification> getUnreadNotificationsForUser(String userId) {
-        return notificationRepository.findUnreadByUserId(userId);
+        return notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
     }
 
+    @Transactional(readOnly = true)
     public int getUnreadCount(String userId) {
-        return notificationRepository.countUnread(userId);
+        return (int) notificationRepository.countByUserIdAndReadFalse(userId);
     }
 
+    @Transactional
     public void markAsRead(String notificationId) {
-        notificationRepository.markAsRead(notificationId);
-    }
-
-    private Notification save(String userId, String message, Notification.NotificationType type) {
-        Notification notification = Notification.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .message(message)
-                .type(type)
-                .createdAt(LocalDateTime.now())
-                .read(false)
-                .build();
-
-        log.info("[NOTIFICATION] userId={} type={} msg={}", userId, type, message);
-        return notificationRepository.save(notification);
-    }
-
-
-    /**
-     * Marks all notifications as read for a given user.
-     * Called when user opens the notification panel.
-     */
-    public void markAllAsRead(String userId) {
-        notificationRepository.findByUserId(userId).forEach(n -> {
+        notificationRepository.findById(notificationId).ifPresent(n -> {
             n.setRead(true);
             notificationRepository.save(n);
         });
     }
 
-    /**
-     * Filters notifications by keyword in message body.
-     * Useful for client-side type filtering (e.g. "joined", "served").
-     */
-    public java.util.List<com.queuesmart.model.Notification> getNotificationsByType(String userId, String keyword) {
-        return notificationRepository.findByUserId(userId).stream()
-                .filter(n -> n.getMessage().toLowerCase().contains(keyword.toLowerCase()))
-                .collect(java.util.stream.Collectors.toList());
-    }
+    // ── private ───────────────────────────────────────────────
+    private Notification save(String userId, String message, Notification.NotificationType type) {
+        UserCredential user = credentialRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
 
-    /**
-     * Returns total notification count for a user.
-     */
-    public int getTotalNotificationCount(String userId) {
-        return notificationRepository.findByUserId(userId).size();
-    }
+        Notification n = Notification.builder()
+                .id(UUID.randomUUID().toString())
+                .user(user)
+                .message(message)
+                .type(type)
+                .read(false)
+                .build();
 
+        log.info("[NOTIFICATION] userId={} type={} msg={}", userId, type, message);
+        return notificationRepository.save(n);
+    }
 }
