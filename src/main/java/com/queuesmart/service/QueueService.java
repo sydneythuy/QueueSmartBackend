@@ -1,13 +1,11 @@
 package com.queuesmart.service;
 
 import com.queuesmart.dto.QueueDto;
-import com.queuesmart.model.QueueEntry;
-import com.queuesmart.repository.QueueRepository;
-import com.queuesmart.repository.UserRepository;
-import com.queuesmart.repository.HistoryRepository;
-import com.queuesmart.model.HistoryRecord;
+import com.queuesmart.model.*;
+import com.queuesmart.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -19,222 +17,195 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class QueueService {
 
-    private final QueueRepository queueRepository;
-    private final UserRepository userRepository;
+    private final QueueRepository          queueRepository;
+    private final QueueEntryRepository     entryRepository;
+    private final UserCredentialRepository credentialRepository;
     private final ServiceManagementService serviceManagementService;
-    private final WaitTimeEstimator waitTimeEstimator;
-    private final NotificationService notificationService;
-    private final HistoryRepository historyRepository;
+    private final WaitTimeEstimator        waitTimeEstimator;
+    private final NotificationService      notificationService;
+    private final HistoryRecordRepository  historyRepo;
+    private final UserProfileRepository    profileRepository;
 
-    public QueueDto.QueueEntryResponse joinQueue(String userId, String serviceId, com.queuesmart.model.Service.PriorityLevel priority) {
-        // Check user exists
-        var user = userRepository.findById(userId)
+    @Transactional
+    public QueueDto.QueueEntryResponse joinQueue(String userId, String serviceId,
+                                                  com.queuesmart.model.Service.PriorityLevel priority) {
+        UserCredential user = credentialRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        // Check service exists and is active
         com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        if (!service.isActive()) {
-            throw new IllegalArgumentException("This service is currently not active");
-        }
+        if (!service.isActive()) throw new IllegalArgumentException("This service is currently not active");
 
-        // Check user not already in this queue
-        if (queueRepository.findByUserIdAndServiceId(userId, serviceId).isPresent()) {
-            throw new IllegalArgumentException("You are already in the queue for this service");
-        }
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found for this service"));
 
-        // Resolve priority: use user's requested or fall back to service's priority
-        com.queuesmart.model.Service.PriorityLevel effectivePriority = (priority != null) ? priority : service.getPriorityLevel();
+        if (queue.getStatus() == Queue.QueueStatus.CLOSED)
+            throw new IllegalArgumentException("This queue is currently closed");
 
-        // Get current sorted active queue to determine position
-        List<QueueEntry> activeQueue = queueRepository.findActiveByServiceId(serviceId);
-        int position = activeQueue.size() + 1;
+        // Prevent duplicate active entries
+        entryRepository.findByQueue_IdAndUser_IdAndStatus(queue.getId(), userId,
+                QueueEntry.EntryStatus.WAITING)
+                .ifPresent(e -> { throw new IllegalArgumentException("You are already in this queue"); });
 
-        int estimatedWait = waitTimeEstimator.estimate(position,
-                service.getExpectedDurationMinutes(), effectivePriority);
+        com.queuesmart.model.Service.PriorityLevel effectivePriority = priority != null ? priority : service.getPriorityLevel();
+
+        List<QueueEntry> activeEntries = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        int position = activeEntries.size() + 1;
+        int wait = waitTimeEstimator.estimate(position, service.getExpectedDurationMinutes(), effectivePriority);
 
         QueueEntry entry = QueueEntry.builder()
                 .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .username(user.getUsername())
-                .serviceId(serviceId)
+                .queue(queue)
+                .user(user)
                 .position(position)
-                .estimatedWaitMinutes(estimatedWait)
                 .joinedAt(LocalDateTime.now())
-                .status(QueueEntry.QueueStatus.WAITING)
+                .status(QueueEntry.EntryStatus.WAITING)
                 .priorityLevel(effectivePriority)
+                .estimatedWaitMinutes(wait)
                 .build();
+        entryRepository.save(entry);
 
-        queueRepository.save(entry);
-
-        // Notify user they have joined
         notificationService.sendQueueJoined(userId, service.getName(), position);
-
-        return new QueueDto.QueueEntryResponse(entry);
+        return toResponse(entry, usernameOf(user));
     }
 
+    @Transactional
     public void leaveQueue(String userId, String serviceId) {
-        QueueEntry entry = queueRepository.findByUserIdAndServiceId(userId, serviceId)
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
+                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
                 .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
 
-        entry.setStatus(QueueEntry.QueueStatus.LEFT);
-        queueRepository.save(entry);
+        entry.setStatus(QueueEntry.EntryStatus.LEFT);
+        entryRepository.save(entry);
 
         com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-
-        // Record in history
-        saveHistory(entry, service, QueueEntry.QueueStatus.LEFT);
-
-        // Notify
+        saveHistory(entry, service, QueueEntry.EntryStatus.LEFT);
         notificationService.sendQueueLeft(userId, service.getName());
-
-        // Recalculate positions for remaining users
-        recalculatePositions(serviceId);
+        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
     }
 
+    @Transactional(readOnly = true)
     public QueueDto.QueueStatusResponse getQueueStatus(String serviceId) {
         com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        List<QueueEntry> activeQueue = queueRepository.findActiveByServiceId(serviceId);
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
 
-        // Update positions dynamically
-        for (int i = 0; i < activeQueue.size(); i++) {
-            activeQueue.get(i).setPosition(i + 1);
-            activeQueue.get(i).setEstimatedWaitMinutes(
-                    waitTimeEstimator.estimate(i + 1,
-                            service.getExpectedDurationMinutes(),
-                            activeQueue.get(i).getPriorityLevel()));
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        for (int i = 0; i < active.size(); i++) {
+            QueueEntry e = active.get(i);
+            e.setPosition(i + 1);
+            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                    i + 1, service.getExpectedDurationMinutes(), e.getPriorityLevel()));
         }
 
-        QueueDto.QueueStatusResponse response = new QueueDto.QueueStatusResponse();
-        response.setServiceId(serviceId);
-        response.setServiceName(service.getName());
-        response.setTotalWaiting(activeQueue.size());
-        response.setEstimatedWaitForNew(
-                waitTimeEstimator.estimateForNewUser(activeQueue.size(), service.getExpectedDurationMinutes()));
-        response.setEntries(activeQueue.stream()
-                .map(QueueDto.QueueEntryResponse::new)
+        QueueDto.QueueStatusResponse resp = new QueueDto.QueueStatusResponse();
+        resp.setServiceId(serviceId);
+        resp.setServiceName(service.getName());
+        resp.setTotalWaiting(active.size());
+        resp.setEstimatedWaitForNew(
+                waitTimeEstimator.estimateForNewUser(active.size(), service.getExpectedDurationMinutes()));
+        resp.setEntries(active.stream()
+                .map(e -> toResponse(e, usernameOf(e.getUser())))
                 .collect(Collectors.toList()));
-        return response;
+        return resp;
     }
 
+    @Transactional
     public QueueDto.QueueEntryResponse serveNext(String serviceId) {
-        List<QueueEntry> activeQueue = queueRepository.findActiveByServiceId(serviceId);
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
 
-        if (activeQueue.isEmpty()) {
-            throw new IllegalArgumentException("Queue is empty — no one to serve");
-        }
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        if (active.isEmpty()) throw new IllegalArgumentException("Queue is empty");
 
-        QueueEntry next = activeQueue.get(0);
-        next.setStatus(QueueEntry.QueueStatus.SERVING);
-        queueRepository.save(next);
+        QueueEntry next = active.get(0);
+        next.setStatus(QueueEntry.EntryStatus.SERVED);
+        entryRepository.save(next);
 
         com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
+        saveHistory(next, service, QueueEntry.EntryStatus.SERVED);
+        notificationService.sendYourTurn(next.getUser().getId(), service.getName());
 
-        // Mark as served immediately (no real serving session in this design)
-        next.setStatus(QueueEntry.QueueStatus.SERVED);
-        queueRepository.save(next);
+        recalculatePositions(queue.getId(), service.getExpectedDurationMinutes());
 
-        // Record history
-        saveHistory(next, service, QueueEntry.QueueStatus.SERVED);
-
-        // Notify the served user
-        notificationService.sendYourTurn(next.getUserId(), service.getName());
-
-        // Notify next-in-line if almost their turn (position 1 or 2 after serving)
-        recalculatePositions(serviceId);
-        List<QueueEntry> remaining = queueRepository.findActiveByServiceId(serviceId);
+        // Notify new first-in-line if they're almost up
+        List<QueueEntry> remaining = entryRepository.findActiveByQueueIdOrdered(queue.getId());
         if (!remaining.isEmpty() && remaining.get(0).getPosition() <= 2) {
             QueueEntry almostNext = remaining.get(0);
             notificationService.sendAlmostYourTurn(
-                    almostNext.getUserId(), service.getName(), almostNext.getPosition());
+                    almostNext.getUser().getId(), service.getName(), almostNext.getPosition());
         }
-
-        return new QueueDto.QueueEntryResponse(next);
+        return toResponse(next, usernameOf(next.getUser()));
     }
 
+    @Transactional(readOnly = true)
     public QueueDto.QueueEntryResponse getUserQueueEntry(String userId, String serviceId) {
-        QueueEntry entry = queueRepository.findByUserIdAndServiceId(userId, serviceId)
+        Queue queue = queueRepository.findByServiceId(serviceId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue not found"));
+
+        QueueEntry entry = entryRepository.findByQueue_IdAndUser_IdAndStatus(
+                        queue.getId(), userId, QueueEntry.EntryStatus.WAITING)
                 .orElseThrow(() -> new IllegalArgumentException("You are not in this queue"));
 
-        // Refresh position and wait
         com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        List<QueueEntry> activeQueue = queueRepository.findActiveByServiceId(serviceId);
-        int position = activeQueue.indexOf(entry) + 1;
-        entry.setPosition(position);
-        entry.setEstimatedWaitMinutes(
-                waitTimeEstimator.estimate(position, service.getExpectedDurationMinutes(), entry.getPriorityLevel()));
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queue.getId());
+        int pos = active.indexOf(entry) + 1;
+        entry.setPosition(pos);
+        entry.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                pos, service.getExpectedDurationMinutes(), entry.getPriorityLevel()));
 
-        return new QueueDto.QueueEntryResponse(entry);
+        return toResponse(entry, usernameOf(entry.getUser()));
     }
 
-    // ---- private helpers ----
+    // ── private helpers ───────────────────────────────────────
 
-    private void recalculatePositions(String serviceId) {
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        List<QueueEntry> activeQueue = queueRepository.findActiveByServiceId(serviceId);
-        for (int i = 0; i < activeQueue.size(); i++) {
-            QueueEntry e = activeQueue.get(i);
+    @Transactional
+    protected void recalculatePositions(String queueId, int durationMinutes) {
+        List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(queueId);
+        for (int i = 0; i < active.size(); i++) {
+            QueueEntry e = active.get(i);
             e.setPosition(i + 1);
-            e.setEstimatedWaitMinutes(
-                    waitTimeEstimator.estimate(i + 1, service.getExpectedDurationMinutes(), e.getPriorityLevel()));
-            queueRepository.save(e);
+            e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                    i + 1, durationMinutes, e.getPriorityLevel()));
+            entryRepository.save(e);
         }
     }
 
-    private void saveHistory(QueueEntry entry, com.queuesmart.model.Service service, QueueEntry.QueueStatus status) {
+    private void saveHistory(QueueEntry entry, com.queuesmart.model.Service service,
+                             QueueEntry.EntryStatus status) {
         long waited = ChronoUnit.MINUTES.between(entry.getJoinedAt(), LocalDateTime.now());
         HistoryRecord record = HistoryRecord.builder()
                 .id(UUID.randomUUID().toString())
-                .userId(entry.getUserId())
-                .username(entry.getUsername())
+                .user(entry.getUser())
                 .serviceId(service.getId())
                 .serviceName(service.getName())
                 .joinedAt(entry.getJoinedAt())
                 .completedAt(LocalDateTime.now())
                 .finalStatus(status)
-                .waitedMinutes((int) waited)
+                .waitedMinutes((int) Math.max(0, waited))
                 .build();
-        historyRepository.save(record);
+        historyRepo.save(record);
     }
 
-
-    /**
-     * Returns all active (WAITING) queue entries for a given user across all services.
-     * Useful for a "My Active Queues" dashboard view.
-     */
-    public java.util.List<QueueDto.QueueEntryResponse> getUserActiveQueues(String userId) {
-        return queueRepository.findByUserId(userId).stream()
-                .filter(e -> e.getStatus() == QueueEntry.QueueStatus.WAITING)
-                .map(QueueDto.QueueEntryResponse::new)
-                .collect(java.util.stream.Collectors.toList());
+    private String usernameOf(UserCredential user) {
+        return profileRepository.findByCredentialId(user.getId())
+                .map(UserProfile::getUsername)
+                .orElse(user.getEmail());
     }
 
-    /**
-     * Returns the current position of a user in a queue, or -1 if not found.
-     */
-    public int getUserPosition(String userId, String serviceId) {
-        java.util.List<QueueEntry> active = queueRepository.findActiveByServiceId(serviceId);
-        for (int i = 0; i < active.size(); i++) {
-            if (active.get(i).getUserId().equals(userId)) return i + 1;
-        }
-        return -1;
+    private QueueDto.QueueEntryResponse toResponse(QueueEntry e, String username) {
+        QueueDto.QueueEntryResponse r = new QueueDto.QueueEntryResponse();
+        r.setId(e.getId());
+        r.setUserId(e.getUser().getId());
+        r.setUsername(username);
+        r.setServiceId(e.getQueue().getService().getId());
+        r.setPosition(e.getPosition());
+        r.setEstimatedWaitMinutes(e.getEstimatedWaitMinutes());
+        r.setJoinedAt(e.getJoinedAt());
+        r.setStatus(e.getStatus());
+        r.setPriorityLevel(e.getPriorityLevel());
+        return r;
     }
-
-    /**
-     * Returns summary statistics for a given service queue:
-     * total waiting, average wait, and position of given user.
-     */
-    public java.util.Map<String, Object> getQueueSummary(String serviceId) {
-        com.queuesmart.model.Service service = serviceManagementService.getRawService(serviceId);
-        java.util.List<QueueEntry> active = queueRepository.findActiveByServiceId(serviceId);
-        double avgWait = active.stream()
-                .mapToInt(QueueEntry::getEstimatedWaitMinutes)
-                .average().orElse(0);
-        java.util.Map<String, Object> summary = new java.util.LinkedHashMap<>();
-        summary.put("serviceId", serviceId);
-        summary.put("serviceName", service.getName());
-        summary.put("totalWaiting", active.size());
-        summary.put("averageWaitMinutes", Math.round(avgWait));
-        return summary;
-    }
-
 }
