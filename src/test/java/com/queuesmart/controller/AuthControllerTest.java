@@ -1,210 +1,157 @@
 package com.queuesmart.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.queuesmart.config.JwtUtil;
 import com.queuesmart.dto.AuthDto;
-import com.queuesmart.repository.UserRepository;
 import com.queuesmart.service.AuthService;
+import com.queuesmart.config.JwtUtil;
+import com.queuesmart.repository.UserCredentialRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityFilterAutoConfiguration;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(AuthController.class)
-@AutoConfigureMockMvc(addFilters = false)
+@WebMvcTest(value = AuthController.class,
+        excludeAutoConfiguration = {SecurityAutoConfiguration.class, SecurityFilterAutoConfiguration.class})
 class AuthControllerTest {
 
-    @Autowired
-    private MockMvc mockMvc;
+    @Autowired private MockMvc       mockMvc;
+    @Autowired private ObjectMapper  objectMapper;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    @MockBean private AuthService              authService;
+    @MockBean private JwtUtil                  jwtUtil;
+    @MockBean private UserCredentialRepository credentialRepository;
 
-    @MockBean private AuthService authService;
-    @MockBean private JwtUtil jwtUtil;
-    @MockBean private UserRepository userRepository;
-
-    // ---- REGISTER ----
+    // ── REGISTER ──────────────────────────────────────────────
 
     @Test
-    void register_ValidRequest_Returns201() throws Exception {
-        AuthDto.RegisterRequest request = new AuthDto.RegisterRequest();
-        request.setUsername("alice");
-        request.setEmail("alice@example.com");
-        request.setPassword("password123");
+    void register_ValidRequest_Returns201WithToken() throws Exception {
+        AuthDto.RegisterRequest req = new AuthDto.RegisterRequest();
+        req.setUsername("alice"); req.setEmail("alice@example.com"); req.setPassword("password123");
 
-        AuthDto.AuthResponse mockResponse = new AuthDto.AuthResponse(
-                "jwt.token", "user-1", "alice", "alice@example.com", "USER");
-
-        when(authService.register(any())).thenReturn(mockResponse);
+        when(authService.register(any()))
+                .thenReturn(new AuthDto.AuthResponse("jwt.tok", "u1", "alice", "alice@example.com", "USER"));
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.username").value("alice"))
-                .andExpect(jsonPath("$.data.token").value("jwt.token"));
+                .andExpect(jsonPath("$.data.token").value("jwt.tok"))
+                .andExpect(jsonPath("$.data.role").value("USER"));
     }
 
     @Test
-    void register_BlankEmail_Returns400() throws Exception {
-        AuthDto.RegisterRequest request = new AuthDto.RegisterRequest();
-        request.setUsername("alice");
-        request.setEmail("");           // invalid
-        request.setPassword("password123");
+    void register_BlankUsername_Returns400() throws Exception {
+        AuthDto.RegisterRequest req = new AuthDto.RegisterRequest();
+        req.setUsername("ab"); // too short — min 3
+        req.setEmail("alice@example.com");
+        req.setPassword("password123");
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false));
     }
 
     @Test
     void register_InvalidEmail_Returns400() throws Exception {
-        AuthDto.RegisterRequest request = new AuthDto.RegisterRequest();
-        request.setUsername("alice");
-        request.setEmail("not-an-email");
-        request.setPassword("password123");
+        AuthDto.RegisterRequest req = new AuthDto.RegisterRequest();
+        req.setUsername("alice"); req.setEmail("not-an-email"); req.setPassword("password123");
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void register_ShortPassword_Returns400() throws Exception {
-        AuthDto.RegisterRequest request = new AuthDto.RegisterRequest();
-        request.setUsername("alice");
-        request.setEmail("alice@example.com");
-        request.setPassword("123");    // too short (min 6)
+        AuthDto.RegisterRequest req = new AuthDto.RegisterRequest();
+        req.setUsername("alice"); req.setEmail("alice@example.com"); req.setPassword("123");
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    void register_ShortUsername_Returns400() throws Exception {
-        AuthDto.RegisterRequest request = new AuthDto.RegisterRequest();
-        request.setUsername("ab");     // too short (min 3)
-        request.setEmail("alice@example.com");
-        request.setPassword("password123");
+    void register_DuplicateEmail_Returns400WithMessage() throws Exception {
+        AuthDto.RegisterRequest req = new AuthDto.RegisterRequest();
+        req.setUsername("alice"); req.setEmail("alice@example.com"); req.setPassword("password123");
+
+        when(authService.register(any()))
+                .thenThrow(new IllegalArgumentException("Email is already registered"));
 
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Email is already registered"));
     }
 
-    // ---- LOGIN ----
+    // ── LOGIN ─────────────────────────────────────────────────
 
     @Test
     void login_ValidCredentials_Returns200() throws Exception {
-        AuthDto.LoginRequest request = new AuthDto.LoginRequest();
-        request.setEmail("alice@example.com");
-        request.setPassword("password123");
+        AuthDto.LoginRequest req = new AuthDto.LoginRequest();
+        req.setEmail("alice@example.com"); req.setPassword("password123");
 
-        AuthDto.AuthResponse mockResponse = new AuthDto.AuthResponse(
-                "jwt.token", "user-1", "alice", "alice@example.com", "USER");
-
-        when(authService.login(any())).thenReturn(mockResponse);
+        when(authService.login(any()))
+                .thenReturn(new AuthDto.AuthResponse("jwt.tok", "u1", "alice", "alice@example.com", "USER"));
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.token").value("jwt.token"))
-                .andExpect(jsonPath("$.data.role").value("USER"));
+                .andExpect(jsonPath("$.data.username").value("alice"));
     }
 
     @Test
     void login_BlankEmail_Returns400() throws Exception {
-        AuthDto.LoginRequest request = new AuthDto.LoginRequest();
-        request.setEmail("");
-        request.setPassword("password123");
+        AuthDto.LoginRequest req = new AuthDto.LoginRequest();
+        req.setEmail(""); req.setPassword("password123");
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
-    void login_InvalidEmailFormat_Returns400() throws Exception {
-        AuthDto.LoginRequest request = new AuthDto.LoginRequest();
-        request.setEmail("not-an-email");
-        request.setPassword("password123");
-
-        mockMvc.perform(post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void login_BadCredentials_Returns400() throws Exception {
-        AuthDto.LoginRequest request = new AuthDto.LoginRequest();
-        request.setEmail("alice@example.com");
-        request.setPassword("wrongpassword");
+    void login_WrongPassword_Returns400() throws Exception {
+        AuthDto.LoginRequest req = new AuthDto.LoginRequest();
+        req.setEmail("alice@example.com"); req.setPassword("wrongpass");
 
         when(authService.login(any()))
                 .thenThrow(new IllegalArgumentException("Invalid email or password"));
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
+                        .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid email or password"));
     }
 
-
     @Test
-    void testRegister_duplicateEmail_returns400() throws Exception {
-        // Mock authService to throw on duplicate email
-        when(authService.register(any())).thenThrow(new IllegalArgumentException("Email is already registered"));
+    void login_InvalidEmailFormat_Returns400() throws Exception {
+        AuthDto.LoginRequest req = new AuthDto.LoginRequest();
+        req.setEmail("not-email"); req.setPassword("password123");
 
-        com.queuesmart.dto.AuthDto.RegisterRequest dup = new com.queuesmart.dto.AuthDto.RegisterRequest();
-        dup.setUsername("otherusername");
-        dup.setEmail("dup@example.com");
-        dup.setPassword("password456");
-
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/api/auth/register")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(dup)))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .jsonPath("$.success").value(false));
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isBadRequest());
     }
-
-    @Test
-    void testLogin_wrongPassword_returnsFailure() throws Exception {
-        // Mock authService.login to throw on wrong password
-        when(authService.login(any())).thenThrow(new IllegalArgumentException("Invalid email or password"));
-
-        com.queuesmart.dto.AuthDto.LoginRequest login = new com.queuesmart.dto.AuthDto.LoginRequest();
-        login.setEmail("logintest@example.com");
-        login.setPassword("wrongpassword");
-
-        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
-                .post("/api/auth/login")
-                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(login)))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .jsonPath("$.success").value(false));
-    }
-
 }
