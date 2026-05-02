@@ -471,7 +471,7 @@ async function loadServices() {
   const services = r.data.data;
   const sel = document.getElementById('serviceSelect');
   sel.innerHTML = services.map(s =>
-    `<option value="${s.id}" data-duration="${s.expectedDurationMinutes}" data-queue="${s.currentQueueSize}" data-priority="${s.priorityLevel}">
+    `<option value="${s.id}" data-duration="${s.expectedDurationMinutes}" data-queue="${s.currentQueueSize}" data-priority="${s.priorityLevel}" data-description="${s.description || ''}">
       ${s.name} (${s.priorityLevel} priority)
     </option>`
   ).join('');
@@ -484,10 +484,12 @@ function updateServiceInfo() {
   const sel = document.getElementById('serviceSelect');
   const opt = sel.options[sel.selectedIndex];
   if (!opt) return;
-  const duration = opt.dataset.duration;
-  const queue    = opt.dataset.queue;
-  const wait     = parseInt(queue) * parseInt(duration);
+  const duration    = opt.dataset.duration;
+  const queue       = opt.dataset.queue;
+  const wait        = parseInt(queue) * parseInt(duration);
+  const description = opt.dataset.description;
   document.getElementById('serviceInfo').innerHTML =
+    (description ? `<div style="margin-bottom:0.5rem; color:#1e4a6d; font-style:italic;">${description}</div>` : '') +
     `⏱ ${duration} min per person &nbsp;|&nbsp; 👥 ${queue} in queue &nbsp;|&nbsp; ⏳ Est. wait: ~${wait} min`;
 }
 
