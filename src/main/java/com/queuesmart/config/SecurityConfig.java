@@ -55,7 +55,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         // Allow React dev server and plain HTML file opened locally
-        config.setAllowedOriginPatterns(List.of("http://localhost:3000", "http://localhost:*", "null"));
+        config.setAllowedOriginPatterns(List.of("http://localhost:3000", "http://localhost:*", "http://127.0.0.1:*", "null"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

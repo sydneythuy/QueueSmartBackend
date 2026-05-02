@@ -84,14 +84,21 @@ class NotificationServiceTest {
     @Test
     void getNotificationsForUser_DelegatesToRepo() {
         Notification n = Notification.builder().id("n1").build();
-        when(notificationRepository.findByUserIdOrderByCreatedAtDesc("u1")).thenReturn(List.of(n));
-
+        when(notificationRepository.findByUser_IdOrderByCreatedAtDesc("u1")).thenReturn(List.of(n));
         assertEquals(1, notificationService.getNotificationsForUser("u1").size());
     }
 
     @Test
+    void getUnreadNotificationsForUser_DelegatesToRepo() {
+        Notification n = Notification.builder().id("n1").read(false).build();
+        when(notificationRepository.findByUser_IdAndReadFalseOrderByCreatedAtDesc("u1"))
+                .thenReturn(List.of(n));
+        assertEquals(1, notificationService.getUnreadNotificationsForUser("u1").size());
+    }
+
+    @Test
     void getUnreadCount_ReturnsCorrectValue() {
-        when(notificationRepository.countByUserIdAndReadFalse("u1")).thenReturn(7L);
+        when(notificationRepository.countByUser_IdAndReadFalse("u1")).thenReturn(7L);
         assertEquals(7, notificationService.getUnreadCount("u1"));
     }
 
@@ -111,5 +118,32 @@ class NotificationServiceTest {
     void markAsRead_NotFound_DoesNotThrow() {
         when(notificationRepository.findById("bad")).thenReturn(Optional.empty());
         assertDoesNotThrow(() -> notificationService.markAsRead("bad"));
+    }
+
+    @Test
+    void markAllAsRead_MarksAllUnreadAndSaves() {
+        Notification n1 = Notification.builder().id("n1").read(false).build();
+        Notification n2 = Notification.builder().id("n2").read(false).build();
+        when(notificationRepository.findByUser_IdAndReadFalseOrderByCreatedAtDesc("u1"))
+                .thenReturn(List.of(n1, n2));
+        when(notificationRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
+
+        notificationService.markAllAsRead("u1");
+
+        assertTrue(n1.isRead());
+        assertTrue(n2.isRead());
+        verify(notificationRepository).saveAll(anyList());
+    }
+
+    @Test
+    void getNotificationsByType_FiltersCorrectly() {
+        Notification n1 = Notification.builder().id("n1").message("joined Advising").build();
+        Notification n2 = Notification.builder().id("n2").message("served at Clinic").build();
+        when(notificationRepository.findByUser_IdOrderByCreatedAtDesc("u1"))
+                .thenReturn(List.of(n1, n2));
+
+        List<Notification> filtered = notificationService.getNotificationsByType("u1", "joined");
+        assertEquals(1, filtered.size());
+        assertEquals("n1", filtered.get(0).getId());
     }
 }

@@ -92,9 +92,11 @@
 
 <!-- NAV BAR -->
 <nav id="navbar" style="display:none;">
-  <div class="logo">🧠 QueueSmart</div>
+  <div class="logo" onclick="goHome()" style="cursor:pointer;">🧠 QueueSmart</div>
   <div class="nav-right">
     <span class="nav-user" id="navUsername"></span>
+    <button class="nav-btn" id="navHomeBtn" onclick="goHome()">🏠 Home</button>
+    <button class="nav-btn" id="navMyQueueBtn" onclick="goMyQueue()" style="display:none;">📍 My Queue</button>
     <button class="nav-btn" onclick="showPage('notifications')">
       🔔 <span class="notif-badge" id="notifBadge" style="display:none">0</span>
     </button>
@@ -160,24 +162,19 @@
   </div>
 </div>
 
-<!-- ===================== USER DASHBOARD ===================== -->
+<!-- ===================== USER HOME ===================== -->
 <div id="userDashboard" class="page">
   <h2>Welcome back, <span id="welcomeName"></span> 👋</h2>
   <div id="userAlert"></div>
 
-  <!-- Active queue status -->
-  <div class="card" id="activeQueueCard" style="display:none;">
-    <h3>📍 Your current queue</h3>
-    <div class="queue-progress">
-      <div class="queue-pos" id="myPosition">–<small>position</small></div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
-      <p>Estimated wait: <strong id="myWaitTime">–</strong> min</p>
-      <p style="margin-top:0.5rem;">Service: <strong id="myServiceName">–</strong></p>
-      <span class="status-tag" id="myStatusTag">waiting</span>
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-danger btn-outline" onclick="doLeaveQueue()">Leave queue</button>
-      <button class="btn btn-outline" onclick="refreshMyStatus()">↻ Refresh</button>
+  <!-- Active queue banner -->
+  <div class="card" id="activeQueueBanner" style="display:none; background:#e0f0fa; border:1.5px solid #2b6f9b;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.8rem;">
+      <div>
+        <strong style="color:#0b2b40;">📍 You're in a queue!</strong>
+        <p style="color:#2b6f9b; font-size:0.9rem; margin-top:0.2rem;">Service: <strong id="bannerServiceName">–</strong> &nbsp;|&nbsp; Position: <strong id="bannerPosition">–</strong> &nbsp;|&nbsp; Est. wait: <strong id="bannerWait">–</strong> min</p>
+      </div>
+      <button class="btn btn-primary" onclick="goMyQueue()">View My Queue →</button>
     </div>
   </div>
 
@@ -192,6 +189,24 @@
       </div>
       <div id="serviceInfo" style="color:#4a6a8a; font-size:0.9rem; margin-bottom:1rem;"></div>
       <button class="btn btn-primary" onclick="doJoinQueue()">Join queue</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MY QUEUE PAGE ===================== -->
+<div id="myQueuePage" class="page">
+  <h2>📍 My Active Queues</h2>
+  <div id="myQueueAlert"></div>
+  <div class="btn-row" style="margin-bottom:1rem;">
+    <button class="btn btn-outline" onclick="loadAllMyQueues()">↻ Refresh All</button>
+    <button class="btn btn-outline" onclick="goHome()">🏠 Back to Home</button>
+  </div>
+  <div id="myQueuesLoading" class="loading-row"><div class="spinner"></div> Loading your queues…</div>
+  <div id="myQueuesList"></div>
+  <div id="noQueueCard" style="display:none;">
+    <div class="card" style="text-align:center;">
+      <p style="color:#888; margin-bottom:1rem;">You are not currently in any queue.</p>
+      <button class="btn btn-primary" onclick="goHome()">Browse Services</button>
     </div>
   </div>
 </div>
@@ -223,6 +238,7 @@
     <button class="tab active" onclick="switchAdminTab('overview')">Overview</button>
     <button class="tab" onclick="switchAdminTab('services')">Services</button>
     <button class="tab" onclick="switchAdminTab('queue')">Queue Management</button>
+    <button class="tab" onclick="switchAdminTab('reports')">📥 Reports</button>
   </div>
 
   <!-- OVERVIEW TAB -->
@@ -286,6 +302,48 @@
         <button class="btn btn-primary" onclick="doServeNext()">✅ Serve next</button>
         <button class="btn btn-outline" onclick="loadAdminQueue()">↻ Refresh</button>
       </div>
+    </div>
+  </div>
+
+  <!-- REPORTS TAB -->
+  <div id="adminReports" style="display:none;">
+    <div class="card">
+      <h3>📥 Export Reports (CSV)</h3>
+      <p style="color:#666; margin-bottom:1.2rem;">Download queue data as CSV files. Optionally filter by date range or service name.</p>
+
+      <!-- Filters -->
+      <div class="card" style="background:#f0f7ff; border:1px solid #9dc8e8; margin-bottom:1rem;">
+        <h4 style="margin:0 0 0.8rem; color:#1e4a6d;">🔍 Filters (optional)</h4>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
+          <div class="form-group" style="margin:0;">
+            <label>From Date</label>
+            <input type="date" id="reportFrom">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label>To Date</label>
+            <input type="date" id="reportTo">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label>Service Name</label>
+            <input type="text" id="reportService" placeholder="e.g. Advising">
+          </div>
+        </div>
+        <button class="btn btn-outline" style="margin-top:0.8rem;" onclick="clearReportFilters()">Clear Filters</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:1rem;">
+        <div class="card" style="background:#f8f9fa; border:1px solid #e0e0e0;">
+          <h4 style="margin:0 0 0.4rem;">📋 Queue Participation History</h4>
+          <p style="color:#666; font-size:0.9rem; margin:0 0 0.8rem;">All user queue visits — includes user, service, join time, wait time, and outcome. Filtered by date range and service if set above.</p>
+          <button class="btn btn-primary" onclick="downloadReport('history')">⬇ Download History CSV</button>
+        </div>
+        <div class="card" style="background:#f8f9fa; border:1px solid #e0e0e0;">
+          <h4 style="margin:0 0 0.4rem;">📊 Service Usage Statistics</h4>
+          <p style="color:#666; font-size:0.9rem; margin:0 0 0.8rem;">Aggregated stats per service — total visits and average wait time. Filtered by service name if set above.</p>
+          <button class="btn btn-primary" onclick="downloadReport('stats')">⬇ Download Stats CSV</button>
+        </div>
+      </div>
+      <div id="reportAlert" style="margin-top:1rem;"></div>
     </div>
   </div>
 </div>
@@ -376,7 +434,7 @@ function onAuthSuccess(userData) {
     loadAdminServices();
   } else {
     showPage('userDashboard');
-    loadServices();
+    loadServices().then(() => restoreQueueState());
   }
   loadNotifCount();
 }
@@ -385,6 +443,7 @@ function logout() {
   token = null;
   currentUser = null;
   currentQueueServiceId = null;
+  localStorage.removeItem('queueServiceId');
   document.getElementById('navbar').style.display = 'none';
   showPage('authPage');
 }
@@ -441,11 +500,17 @@ async function doJoinQueue() {
   if (r.ok) {
     const entry = r.data.data;
     currentQueueServiceId = serviceId;
-    showAlert('userAlert', '✅ Joined queue successfully!', 'success');
-    showMyQueueStatus(entry, sel.options[sel.selectedIndex].text);
-    document.getElementById('joinQueueCard').style.display = 'none';
+    localStorage.setItem('queueServiceId', serviceId);
+    const svcName = sel.options[sel.selectedIndex].text.split(' (')[0];
+    // Update banner
+    document.getElementById('activeQueueBanner').style.display = '';
+    document.getElementById('bannerServiceName').textContent = svcName;
+    document.getElementById('bannerPosition').textContent = '#' + entry.position;
+    document.getElementById('bannerWait').textContent = entry.estimatedWaitMinutes;
+    document.getElementById('navMyQueueBtn').style.display = '';
+    showAlert('userAlert', '✅ Joined queue for <strong>' + svcName + '</strong>! Position: #' + entry.position + ' &nbsp;<a href="#" onclick="goMyQueue(); return false;" style="color:#1a6b32; font-weight:600;">View My Queue →</a>', 'success');
   } else {
-    showAlert('userAlert', r.data.message || 'Failed to join queue', 'error');
+    showAlert('userAlert', r.data?.message || 'Failed to join queue', 'error');
   }
 }
 
@@ -453,13 +518,9 @@ async function doLeaveQueue() {
   if (!currentQueueServiceId) return;
   const r = await api('DELETE', `/queue/leave/${currentQueueServiceId}`);
   if (r.ok) {
-    currentQueueServiceId = null;
-    document.getElementById('activeQueueCard').style.display = 'none';
-    document.getElementById('joinQueueCard').style.display = '';
-    showAlert('userAlert', 'You have left the queue.', 'info');
-    loadServices();
+    handleRemovedFromQueue('LEFT');
   } else {
-    showAlert('userAlert', r.data.message || 'Failed to leave queue', 'error');
+    showAlert('userAlert', r.data?.message || 'Failed to leave queue', 'error');
   }
 }
 
@@ -467,22 +528,58 @@ async function refreshMyStatus() {
   if (!currentQueueServiceId) return;
   const r = await api('GET', `/queue/my/${currentQueueServiceId}`);
   if (r.ok) {
-    const svcName = document.getElementById('myServiceName').textContent;
-    showMyQueueStatus(r.data.data, svcName);
+    const entry = r.data.data;
+    if (entry.status && entry.status !== 'WAITING') {
+      handleRemovedFromQueue(entry.status);
+      return;
+    }
+    loadAllMyQueues();
+  } else {
+    handleRemovedFromQueue('SERVED');
   }
 }
 
+function handleRemovedFromQueue(status) {
+  currentQueueServiceId = null;
+  localStorage.removeItem('queueServiceId');
+  // Hide queue banner and nav button
+  document.getElementById('activeQueueBanner').style.display = 'none';
+  document.getElementById('navMyQueueBtn').style.display = 'none';
+  const msg = status === 'SERVED'
+    ? "✅ You've been served! Thank you for your patience."
+    : 'You have left the queue.';
+  goHome();
+  setTimeout(() => showAlert('userAlert', msg, status === 'SERVED' ? 'success' : 'info'), 100);
+  loadServices();
+}
+
 function showMyQueueStatus(entry, serviceName) {
+  const name = serviceName || entry.serviceId;
+  const pos = entry.position;
+  const wait = entry.estimatedWaitMinutes;
+
+  // Update My Queue page
   document.getElementById('activeQueueCard').style.display = '';
-  document.getElementById('myPosition').innerHTML = `${entry.position}<small>position</small>`;
-  document.getElementById('myWaitTime').textContent = entry.estimatedWaitMinutes;
-  document.getElementById('myServiceName').textContent = serviceName || entry.serviceId;
-  const pct = Math.min(100, Math.max(10, (1 / (entry.position || 1)) * 100));
+  document.getElementById('noQueueCard').style.display = 'none';
+  document.getElementById('myPosition').innerHTML = `${pos}<small>position</small>`;
+  document.getElementById('myWaitTime').textContent = wait;
+  document.getElementById('myServiceName').textContent = name;
+  document.getElementById('myQueueServiceTitle').textContent = '📍 ' + name;
+  const pct = Math.min(100, Math.max(10, (1 / (pos || 1)) * 100));
   document.getElementById('progressFill').style.width = pct + '%';
   const tag = document.getElementById('myStatusTag');
-  if (entry.position === 1)       { tag.textContent='🟢 Almost your turn!'; tag.className='status-tag tag-almost'; }
-  else if (entry.position <= 3)   { tag.textContent='🔵 Getting close'; tag.className='status-tag tag-almost'; }
-  else                            { tag.textContent='⏳ Waiting'; tag.className='status-tag tag-waiting'; }
+  if (pos === 1)       { tag.textContent='🟢 Almost your turn!'; tag.className='status-tag tag-almost'; }
+  else if (pos <= 3)   { tag.textContent='🔵 Getting close'; tag.className='status-tag tag-almost'; }
+  else                 { tag.textContent='⏳ Waiting'; tag.className='status-tag tag-waiting'; }
+
+  // Update banner on home page
+  document.getElementById('activeQueueBanner').style.display = '';
+  document.getElementById('bannerServiceName').textContent = name;
+  document.getElementById('bannerPosition').textContent = '#' + pos;
+  document.getElementById('bannerWait').textContent = wait;
+
+  // Show My Queue nav button
+  document.getElementById('navMyQueueBtn').style.display = '';
 }
 
 // ============================================================
@@ -551,6 +648,23 @@ async function loadHistory() {
     </table>`;
 }
 
+
+// ============================================================
+//  NAVIGATION HELPERS
+// ============================================================
+function goHome() {
+  if (currentUser && currentUser.role === 'ADMIN') {
+    showPage('adminDashboard');
+  } else {
+    showPage('userDashboard');
+  }
+}
+
+function goMyQueue() {
+  showPage('myQueuePage');
+  loadAllMyQueues();
+}
+
 // ============================================================
 //  ADMIN
 // ============================================================
@@ -560,6 +674,7 @@ function switchAdminTab(tab) {
   document.getElementById('adminOverview').style.display  = tab === 'overview'  ? '' : 'none';
   document.getElementById('adminServices').style.display  = tab === 'services'  ? '' : 'none';
   document.getElementById('adminQueue').style.display     = tab === 'queue'     ? '' : 'none';
+  document.getElementById('adminReports').style.display   = tab === 'reports'   ? '' : 'none';
   if (tab === 'queue') loadAdminQueueServiceList();
 }
 
@@ -693,6 +808,154 @@ function showAlert(id, msg, type) {
 function clearAlert(id) { const el=document.getElementById(id); if(el) el.innerHTML=''; }
 function showError(id, msg) { const el=document.getElementById(id); if(el) el.textContent=msg; }
 function clearErrors(ids) { ids.forEach(id => { const el=document.getElementById(id); if(el) el.textContent=''; }); }
+
+// ============================================================
+//  RESTORE QUEUE STATE AFTER LOGIN
+// ============================================================
+
+async function loadAllMyQueues() {
+  document.getElementById('myQueuesLoading').style.display = 'flex';
+  document.getElementById('myQueuesList').innerHTML = '';
+  document.getElementById('noQueueCard').style.display = 'none';
+
+  const r = await api('GET', '/queue/my');
+  document.getElementById('myQueuesLoading').style.display = 'none';
+
+  if (!r.ok || !r.data.data || r.data.data.length === 0) {
+    document.getElementById('noQueueCard').style.display = '';
+    document.getElementById('navMyQueueBtn').style.display = 'none';
+    document.getElementById('activeQueueBanner').style.display = 'none';
+    currentQueueServiceId = null;
+    localStorage.removeItem('queueServiceId');
+    return;
+  }
+
+  const entries = r.data.data;
+  document.getElementById('navMyQueueBtn').style.display = '';
+
+  // Also fetch service names
+  const svcR = await api('GET', '/services');
+  const services = svcR.ok ? svcR.data.data : [];
+  const svcMap = {};
+  services.forEach(s => svcMap[s.id] = s.name);
+
+  document.getElementById('myQueuesList').innerHTML = entries.map(e => {
+    const svcName = svcMap[e.serviceId] || e.serviceId;
+    const pos = e.position;
+    const wait = e.estimatedWaitMinutes;
+    let tagClass = 'tag-waiting', tagText = '⏳ Waiting';
+    if (pos === 1)     { tagClass = 'tag-almost'; tagText = '🟢 Almost your turn!'; }
+    else if (pos <= 3) { tagClass = 'tag-almost'; tagText = '🔵 Getting close'; }
+    const pct = Math.min(100, Math.max(10, (1 / (pos || 1)) * 100));
+    return `
+      <div class="card">
+        <h3>📍 ${svcName}</h3>
+        <div class="queue-progress">
+          <div class="queue-pos">${pos}<small>position</small></div>
+          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+          <p>Estimated wait: <strong>${wait}</strong> min</p>
+          <span class="status-tag ${tagClass}">${tagText}</span>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger btn-outline" onclick="doLeaveQueueById('${e.serviceId}', this)">Leave queue</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Update banner with first entry
+  const first = entries[0];
+  const firstName = svcMap[first.serviceId] || first.serviceId;
+  document.getElementById('bannerServiceName').textContent = firstName + (entries.length > 1 ? ` +${entries.length - 1} more` : '');
+  document.getElementById('bannerPosition').textContent = '#' + first.position;
+  document.getElementById('bannerWait').textContent = first.estimatedWaitMinutes;
+  document.getElementById('activeQueueBanner').style.display = '';
+}
+
+async function doLeaveQueueById(serviceId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Leaving…';
+  const r = await api('DELETE', `/queue/leave/${serviceId}`);
+  if (r.ok) {
+    // Clear tracking if this was the stored service
+    if (serviceId === currentQueueServiceId) {
+      currentQueueServiceId = null;
+      localStorage.removeItem('queueServiceId');
+    }
+    showAlert('myQueueAlert', 'You have left the queue.', 'info');
+    // Reload queue list — this also updates or hides the banner
+    await loadAllMyQueues();
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Leave queue';
+    showAlert('myQueueAlert', r.data?.message || 'Failed to leave queue', 'error');
+  }
+}
+
+async function restoreQueueState() {
+  const savedServiceId = localStorage.getItem('queueServiceId');
+  if (!savedServiceId) return;
+  const r = await api('GET', `/queue/my/${savedServiceId}`);
+  if (r.ok && r.data.data && r.data.data.status === 'WAITING') {
+    currentQueueServiceId = savedServiceId;
+    const svcR = await api('GET', '/services');
+    let svcName = savedServiceId;
+    if (svcR.ok) {
+      const svc = svcR.data.data.find(s => s.id === savedServiceId);
+      if (svc) svcName = svc.name;
+    }
+    showMyQueueStatus(r.data.data, svcName);
+    showAlert('userAlert', '✅ Restored your queue position. <a href="#" onclick="goMyQueue(); return false;" style="color:#1a6b32; font-weight:600;">View My Queue →</a>', 'success');
+  } else {
+    localStorage.removeItem('queueServiceId');
+  }
+}
+
+
+// ============================================================
+//  REPORTS
+// ============================================================
+function clearReportFilters() {
+  document.getElementById('reportFrom').value = '';
+  document.getElementById('reportTo').value = '';
+  document.getElementById('reportService').value = '';
+}
+
+async function downloadReport(type) {
+  const alertEl = document.getElementById('reportAlert');
+  alertEl.innerHTML = '<div class="alert alert-info">⏳ Generating report…</div>';
+  const from = document.getElementById('reportFrom').value;
+  const to = document.getElementById('reportTo').value;
+  const service = document.getElementById('reportService').value;
+  const params = new URLSearchParams();
+  if (from) params.append('from', from);
+  if (to) params.append('to', to);
+  if (service) params.append('service', service);
+  const query = params.toString() ? '?' + params.toString() : '';
+  try {
+    const endpoint = (type === 'history' ? '/reports/history/csv' : '/reports/stats/csv') + query;
+    const response = await fetch(API + endpoint, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!response.ok) {
+      alertEl.innerHTML = '<div class="alert alert-error">❌ Failed to generate report.</div>';
+      return;
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+    const filename = filenameMatch ? filenameMatch[1] : (type + '_report.csv');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alertEl.innerHTML = '<div class="alert alert-success">✅ Downloaded: ' + filename + '</div>';
+  } catch (e) {
+    alertEl.innerHTML = '<div class="alert alert-error">❌ Error: ' + e.message + '</div>';
+  }
+}
+
 </script>
 </body>
 </html>

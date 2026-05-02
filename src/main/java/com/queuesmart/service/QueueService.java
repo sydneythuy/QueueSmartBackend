@@ -159,6 +159,25 @@ public class QueueService {
         return toResponse(entry, usernameOf(entry.getUser()));
     }
 
+
+    @Transactional(readOnly = true)
+    public List<QueueDto.QueueEntryResponse> getAllUserQueueEntries(String userId) {
+        return entryRepository.findByUser_IdOrderByJoinedAtDesc(userId)
+                .stream()
+                .filter(e -> e.getStatus() == QueueEntry.EntryStatus.WAITING)
+                .map(e -> {
+                    com.queuesmart.model.Service service = serviceManagementService
+                            .getRawService(e.getQueue().getService().getId());
+                    List<QueueEntry> active = entryRepository.findActiveByQueueIdOrdered(e.getQueue().getId());
+                    int pos = active.indexOf(e) + 1;
+                    e.setPosition(pos);
+                    e.setEstimatedWaitMinutes(waitTimeEstimator.estimate(
+                            pos, service.getExpectedDurationMinutes(), e.getPriorityLevel()));
+                    return toResponse(e, usernameOf(e.getUser()));
+                })
+                .collect(Collectors.toList());
+    }
+
     // ── private helpers ───────────────────────────────────────
 
     @Transactional

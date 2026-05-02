@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -19,7 +20,7 @@ public class HistoryService {
 
     @Transactional(readOnly = true)
     public List<HistoryRecord> getUserHistory(String userId) {
-        return historyRepo.findByUserIdOrderByJoinedAtDesc(userId);
+        return historyRepo.findByUser_IdOrderByJoinedAtDesc(userId);
     }
 
     @Transactional(readOnly = true)
@@ -46,5 +47,24 @@ public class HistoryService {
     @Transactional(readOnly = true)
     public long getTotalServed() {
         return historyRepo.countByFinalStatus(QueueEntry.EntryStatus.SERVED);
+    }
+
+    /**
+     * Returns the N most recent history entries for a user.
+     */
+    @Transactional(readOnly = true)
+    public List<HistoryRecord> getRecentHistory(String userId, int limit) {
+        return historyRepo.findByUser_IdOrderByJoinedAtDesc(userId)
+                .stream()
+                .limit(limit)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Returns the total number of queue visits for a user.
+     */
+    @Transactional(readOnly = true)
+    public long countUserHistory(String userId) {
+        return historyRepo.findByUser_IdOrderByJoinedAtDesc(userId).size();
     }
 }

@@ -41,8 +41,6 @@ class ServiceManagementServiceTest {
         createReq.setPriorityLevel(Service.PriorityLevel.MEDIUM);
     }
 
-    // ── CREATE ────────────────────────────────────────────────
-
     @Test
     void createService_Success_SavesServiceAndQueue() {
         when(serviceRepository.existsByNameIgnoreCase("Advising")).thenReturn(false);
@@ -55,7 +53,7 @@ class ServiceManagementServiceTest {
         assertEquals("Advising", resp.getName());
         assertTrue(resp.isActive());
         verify(serviceRepository).save(any(Service.class));
-        verify(queueRepository).save(any(Queue.class));   // Queue row auto-created
+        verify(queueRepository).save(any(Queue.class));
     }
 
     @Test
@@ -66,8 +64,6 @@ class ServiceManagementServiceTest {
                 () -> serviceManagementService.createService(createReq, "admin-1"));
         verify(serviceRepository, never()).save(any());
     }
-
-    // ── UPDATE ────────────────────────────────────────────────
 
     @Test
     void updateService_ChangeDuration_Persists() {
@@ -106,8 +102,6 @@ class ServiceManagementServiceTest {
                 () -> serviceManagementService.updateService("bad", new ServiceDto.UpdateServiceRequest(), "a"));
     }
 
-    // ── GET ───────────────────────────────────────────────────
-
     @Test
     void getAllServices_ReturnsBothActiveAndInactive() {
         Service s1 = Service.builder().id("s1").name("A").active(true).build();
@@ -145,8 +139,6 @@ class ServiceManagementServiceTest {
                 () -> serviceManagementService.getServiceById("nope"));
     }
 
-    // ── DELETE ────────────────────────────────────────────────
-
     @Test
     void deleteService_Exists_CallsDeleteById() {
         when(serviceRepository.existsById("s1")).thenReturn(true);
@@ -161,8 +153,6 @@ class ServiceManagementServiceTest {
                 () -> serviceManagementService.deleteService("bad"));
     }
 
-    // ── QUEUE SIZE SHOWN IN RESPONSE ──────────────────────────
-
     @Test
     void createService_QueueSizeInResponse_ReflectsWaitingCount() {
         when(serviceRepository.existsByNameIgnoreCase(anyString())).thenReturn(false);
@@ -171,7 +161,7 @@ class ServiceManagementServiceTest {
 
         Queue q = Queue.builder().id("q1").build();
         when(queueRepository.findByServiceId(anyString())).thenReturn(Optional.of(q));
-        when(queueEntryRepository.countByQueueIdAndStatus("q1", QueueEntry.EntryStatus.WAITING))
+        when(queueEntryRepository.countByQueue_IdAndStatus("q1", QueueEntry.EntryStatus.WAITING))
                 .thenReturn(4L);
 
         ServiceDto.ServiceResponse resp = serviceManagementService.createService(createReq, "admin-1");

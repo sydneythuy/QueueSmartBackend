@@ -102,7 +102,7 @@ public class ServiceManagementService {
     // ── private ───────────────────────────────────────────────
     private ServiceDto.ServiceResponse toResponse(Service s) {
         int queueSize = queueRepository.findByServiceId(s.getId())
-                .map(q -> (int) queueEntryRepository.countByQueueIdAndStatus(
+                .map(q -> (int) queueEntryRepository.countByQueue_IdAndStatus(
                         q.getId(), com.queuesmart.model.QueueEntry.EntryStatus.WAITING))
                 .orElse(0);
         return new ServiceDto.ServiceResponse(s, queueSize);

@@ -40,24 +40,20 @@ class QueueServiceTest {
     void setUp() {
         testUser = UserCredential.builder()
                 .id("u1").email("alice@example.com").role(UserCredential.Role.USER).build();
-
         testService = Service.builder()
                 .id("svc-1").name("Advising").description("Academic advising")
                 .expectedDurationMinutes(15).priorityLevel(Service.PriorityLevel.MEDIUM)
                 .active(true).build();
-
         testQueue = Queue.builder()
                 .id("q1").service(testService).status(Queue.QueueStatus.OPEN).build();
     }
-
-    // ── JOIN ──────────────────────────────────────────────────
 
     @Test
     void joinQueue_Success_CreatesEntryAndNotifies() {
         when(credentialRepository.findById("u1")).thenReturn(Optional.of(testUser));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
-        when(entryRepository.findByQueueIdAndUserIdAndStatus("q1", "u1",
+        when(entryRepository.findByQueue_IdAndUser_IdAndStatus("q1", "u1",
                 QueueEntry.EntryStatus.WAITING)).thenReturn(Optional.empty());
         when(entryRepository.findActiveByQueueIdOrdered("q1")).thenReturn(List.of());
         when(waitTimeEstimator.estimate(anyInt(), anyInt(), any())).thenReturn(0);
@@ -77,7 +73,6 @@ class QueueServiceTest {
         testService.setActive(false);
         when(credentialRepository.findById("u1")).thenReturn(Optional.of(testUser));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
-
         assertThrows(IllegalArgumentException.class,
                 () -> queueService.joinQueue("u1", "svc-1", null));
     }
@@ -88,7 +83,6 @@ class QueueServiceTest {
         when(credentialRepository.findById("u1")).thenReturn(Optional.of(testUser));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
-
         assertThrows(IllegalArgumentException.class,
                 () -> queueService.joinQueue("u1", "svc-1", null));
     }
@@ -99,9 +93,8 @@ class QueueServiceTest {
         when(credentialRepository.findById("u1")).thenReturn(Optional.of(testUser));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
-        when(entryRepository.findByQueueIdAndUserIdAndStatus("q1", "u1",
+        when(entryRepository.findByQueue_IdAndUser_IdAndStatus("q1", "u1",
                 QueueEntry.EntryStatus.WAITING)).thenReturn(Optional.of(existing));
-
         assertThrows(IllegalArgumentException.class,
                 () -> queueService.joinQueue("u1", "svc-1", null));
     }
@@ -113,8 +106,6 @@ class QueueServiceTest {
                 () -> queueService.joinQueue("bad", "svc-1", null));
     }
 
-    // ── LEAVE ─────────────────────────────────────────────────
-
     @Test
     void leaveQueue_Success_SetsLeftStatusAndNotifies() {
         QueueEntry entry = QueueEntry.builder()
@@ -124,7 +115,7 @@ class QueueServiceTest {
                 .priorityLevel(Service.PriorityLevel.MEDIUM).build();
 
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
-        when(entryRepository.findByQueueIdAndUserIdAndStatus("q1", "u1",
+        when(entryRepository.findByQueue_IdAndUser_IdAndStatus("q1", "u1",
                 QueueEntry.EntryStatus.WAITING)).thenReturn(Optional.of(entry));
         when(entryRepository.save(any())).thenAnswer(i -> i.getArgument(0));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
@@ -140,14 +131,11 @@ class QueueServiceTest {
     @Test
     void leaveQueue_NotInQueue_ThrowsException() {
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
-        when(entryRepository.findByQueueIdAndUserIdAndStatus(any(), any(), any()))
+        when(entryRepository.findByQueue_IdAndUser_IdAndStatus(any(), any(), any()))
                 .thenReturn(Optional.empty());
-
         assertThrows(IllegalArgumentException.class,
                 () -> queueService.leaveQueue("u1", "svc-1"));
     }
-
-    // ── SERVE NEXT ────────────────────────────────────────────
 
     @Test
     void serveNext_Success_MarksServedAndNotifies() {
@@ -159,8 +147,8 @@ class QueueServiceTest {
 
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
         when(entryRepository.findActiveByQueueIdOrdered("q1"))
-                .thenReturn(List.of(entry))   // first call — get next
-                .thenReturn(List.of());        // second call — recalculate
+                .thenReturn(List.of(entry))
+                .thenReturn(List.of());
         when(entryRepository.save(any())).thenAnswer(i -> i.getArgument(0));
         when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
         when(profileRepository.findByCredentialId("u1")).thenReturn(Optional.empty());
@@ -176,11 +164,8 @@ class QueueServiceTest {
     void serveNext_EmptyQueue_ThrowsException() {
         when(queueRepository.findByServiceId("svc-1")).thenReturn(Optional.of(testQueue));
         when(entryRepository.findActiveByQueueIdOrdered("q1")).thenReturn(List.of());
-
         assertThrows(IllegalArgumentException.class, () -> queueService.serveNext("svc-1"));
     }
-
-    // ── STATUS ────────────────────────────────────────────────
 
     @Test
     void getQueueStatus_ReturnsCorrectTotals() {
@@ -202,5 +187,30 @@ class QueueServiceTest {
         assertEquals(1, status.getTotalWaiting());
         assertEquals("Advising", status.getServiceName());
         assertEquals(1, status.getEntries().size());
+    }
+
+    @Test
+    void getAllUserQueueEntries_ReturnsOnlyWaiting() {
+        QueueEntry waiting = QueueEntry.builder()
+                .id("e1").queue(testQueue).user(testUser)
+                .joinedAt(LocalDateTime.now())
+                .status(QueueEntry.EntryStatus.WAITING)
+                .priorityLevel(Service.PriorityLevel.MEDIUM).build();
+        QueueEntry served = QueueEntry.builder()
+                .id("e2").queue(testQueue).user(testUser)
+                .joinedAt(LocalDateTime.now().minusHours(1))
+                .status(QueueEntry.EntryStatus.SERVED)
+                .priorityLevel(Service.PriorityLevel.MEDIUM).build();
+
+        when(entryRepository.findByUser_IdOrderByJoinedAtDesc("u1"))
+                .thenReturn(List.of(waiting, served));
+        when(entryRepository.findActiveByQueueIdOrdered("q1")).thenReturn(List.of(waiting));
+        when(serviceManagementService.getRawService("svc-1")).thenReturn(testService);
+        when(waitTimeEstimator.estimate(anyInt(), anyInt(), any())).thenReturn(0);
+        when(profileRepository.findByCredentialId("u1")).thenReturn(Optional.empty());
+
+        List<QueueDto.QueueEntryResponse> result = queueService.getAllUserQueueEntries("u1");
+        assertEquals(1, result.size());
+        assertEquals("e1", result.get(0).getId());
     }
 }

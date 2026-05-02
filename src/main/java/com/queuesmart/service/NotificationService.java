@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -50,17 +51,17 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public List<Notification> getNotificationsForUser(String userId) {
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        return notificationRepository.findByUser_IdOrderByCreatedAtDesc(userId);
     }
 
     @Transactional(readOnly = true)
     public List<Notification> getUnreadNotificationsForUser(String userId) {
-        return notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
+        return notificationRepository.findByUser_IdAndReadFalseOrderByCreatedAtDesc(userId);
     }
 
     @Transactional(readOnly = true)
     public int getUnreadCount(String userId) {
-        return (int) notificationRepository.countByUserIdAndReadFalse(userId);
+        return (int) notificationRepository.countByUser_IdAndReadFalse(userId);
     }
 
     @Transactional
@@ -69,6 +70,28 @@ public class NotificationService {
             n.setRead(true);
             notificationRepository.save(n);
         });
+    }
+
+    /**
+     * Returns notifications whose message contains the given keyword (case-insensitive).
+     */
+    @Transactional(readOnly = true)
+    public List<Notification> getNotificationsByType(String userId, String keyword) {
+        return notificationRepository.findByUser_IdOrderByCreatedAtDesc(userId)
+                .stream()
+                .filter(n -> n.getMessage() != null &&
+                        n.getMessage().toLowerCase().contains(keyword.toLowerCase()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Marks all notifications as read for a user.
+     */
+    @Transactional
+    public void markAllAsRead(String userId) {
+        List<Notification> unread = notificationRepository.findByUser_IdAndReadFalseOrderByCreatedAtDesc(userId);
+        unread.forEach(n -> n.setRead(true));
+        notificationRepository.saveAll(unread);
     }
 
     // ── private ───────────────────────────────────────────────

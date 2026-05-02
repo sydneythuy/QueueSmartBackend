@@ -15,6 +15,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+<<<<<<< Updated upstream
+=======
+import static org.mockito.ArgumentMatchers.anyInt;
+>>>>>>> Stashed changes
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -39,7 +43,12 @@ class HistoryControllerTest {
     void getMyHistory_ReturnsOk() throws Exception {
         when(historyService.getUserHistory(any())).thenReturn(List.of());
         mockMvc.perform(get("/api/history").principal(userAuth()))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+>>>>>>> Stashed changes
     }
 
     @Test
@@ -55,6 +64,27 @@ class HistoryControllerTest {
         when(historyService.getAverageWaitByService()).thenReturn(Map.of());
         when(historyService.getTotalServed()).thenReturn(5L);
         mockMvc.perform(get("/api/history/stats"))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void getRecentHistory_ReturnsOk() throws Exception {
+        when(historyService.getRecentHistory(any(), anyInt())).thenReturn(List.of());
+        mockMvc.perform(get("/api/history/recent").param("limit", "5").principal(userAuth()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void getHistoryCount_ReturnsCount() throws Exception {
+        when(historyService.countUserHistory(any())).thenReturn(3L);
+        mockMvc.perform(get("/api/history/count").principal(userAuth()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").value(3));
+>>>>>>> Stashed changes
     }
 }

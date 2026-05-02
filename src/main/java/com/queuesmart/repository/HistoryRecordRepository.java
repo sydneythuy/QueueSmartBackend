@@ -11,7 +11,7 @@ import java.util.Map;
 
 @Repository
 public interface HistoryRecordRepository extends JpaRepository<HistoryRecord, String> {
-    List<HistoryRecord> findByUserIdOrderByJoinedAtDesc(String userId);
+    List<HistoryRecord> findByUser_IdOrderByJoinedAtDesc(String userId);
     List<HistoryRecord> findByServiceId(String serviceId);
     long countByFinalStatus(QueueEntry.EntryStatus status);
 

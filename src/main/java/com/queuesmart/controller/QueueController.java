@@ -11,6 +11,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/queue")
 @RequiredArgsConstructor
@@ -21,7 +23,6 @@ public class QueueController {
     /**
      * POST /api/queue/join
      * Body: { serviceId, priorityLevel? }
-     * Matches the "Join" button in the frontend Queue screen
      */
     @PostMapping("/join")
     public ResponseEntity<ApiResponse<QueueDto.QueueEntryResponse>> joinQueue(
@@ -38,7 +39,6 @@ public class QueueController {
 
     /**
      * DELETE /api/queue/leave/{serviceId}
-     * Matches the "Leave" button in the frontend Queue screen
      */
     @DeleteMapping("/leave/{serviceId}")
     public ResponseEntity<ApiResponse<Void>> leaveQueue(
@@ -52,7 +52,6 @@ public class QueueController {
 
     /**
      * GET /api/queue/status/{serviceId}
-     * Returns current queue — used by frontend Queue Status and Admin Dashboard screens
      */
     @GetMapping("/status/{serviceId}")
     public ResponseEntity<ApiResponse<QueueDto.QueueStatusResponse>> getQueueStatus(
@@ -63,8 +62,21 @@ public class QueueController {
     }
 
     /**
+     * GET /api/queue/my
+     * Returns ALL active queue entries for the authenticated user across all services.
+     */
+    @GetMapping("/my")
+    public ResponseEntity<ApiResponse<List<QueueDto.QueueEntryResponse>>> getAllMyQueueEntries(
+            Authentication auth) {
+
+        String userId = (String) auth.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success("Your active queues",
+                queueService.getAllUserQueueEntries(userId)));
+    }
+
+    /**
      * GET /api/queue/my/{serviceId}
-     * Returns the authenticated user's own queue entry — Queue Status screen
+     * Returns the authenticated user's queue entry for a specific service.
      */
     @GetMapping("/my/{serviceId}")
     public ResponseEntity<ApiResponse<QueueDto.QueueEntryResponse>> getMyQueueEntry(
@@ -78,7 +90,6 @@ public class QueueController {
 
     /**
      * POST /api/queue/serve/{serviceId}  (admin only)
-     * Serves the next user — matches "Serve next" button in Admin Queue Management screen
      */
     @PostMapping("/serve/{serviceId}")
     @PreAuthorize("hasRole('ADMIN')")

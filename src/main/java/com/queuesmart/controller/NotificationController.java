@@ -60,4 +60,28 @@ public class NotificationController {
         notificationService.markAsRead(id);
         return ResponseEntity.ok(ApiResponse.success("Notification marked as read", null));
     }
+
+    /**
+     * GET /api/notifications/filter?keyword=joined
+     * Returns notifications whose message contains the given keyword.
+     */
+    @GetMapping("/filter")
+    public ResponseEntity<ApiResponse<List<Notification>>> filterNotifications(
+            @RequestParam String keyword,
+            Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success("Filtered notifications",
+                notificationService.getNotificationsByType(userId, keyword)));
+    }
+
+    /**
+     * PATCH /api/notifications/read-all
+     * Marks all notifications as read for the authenticated user.
+     */
+    @PatchMapping("/read-all")
+    public ResponseEntity<ApiResponse<Void>> markAllRead(Authentication auth) {
+        String userId = (String) auth.getPrincipal();
+        notificationService.markAllAsRead(userId);
+        return ResponseEntity.ok(ApiResponse.success("All notifications marked as read", null));
+    }
 }

@@ -12,11 +12,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Integration tests for Spring Data JPA repositories.
- * Uses H2 in-memory database (no real MySQL required).
- * Schema is auto-created from @Entity classes via ddl-auto=create-drop.
- */
 @DataJpaTest
 @ActiveProfiles("test")
 class RepositoryIntegrationTest {
@@ -35,7 +30,6 @@ class RepositoryIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        // Clean slate
         entryRepo.deleteAll();
         historyRepo.deleteAll();
         notifRepo.deleteAll();
@@ -57,8 +51,6 @@ class RepositoryIntegrationTest {
                 .id("q1").service(savedService).status(Queue.QueueStatus.OPEN).build());
     }
 
-    // ── UserCredentialRepository ──────────────────────────────
-
     @Test
     void credential_FindByEmail_ReturnsUser() {
         assertTrue(credentialRepo.findByEmail("alice@example.com").isPresent());
@@ -73,21 +65,17 @@ class RepositoryIntegrationTest {
 
     @Test
     void credential_DuplicateEmail_ThrowsDataIntegrityViolation() {
-        // unique constraint on email
         assertThrows(Exception.class, () ->
                 credentialRepo.saveAndFlush(UserCredential.builder()
                         .id("u2").email("alice@example.com")
                         .password("hashed").role(UserCredential.Role.USER).build()));
     }
 
-    // ── UserProfileRepository ─────────────────────────────────
-
     @Test
     void profile_SaveAndFindByCredentialId() {
         profileRepo.save(UserProfile.builder()
                 .id("p1").credential(savedUser).username("alice")
                 .emailVerified(false).build());
-
         assertTrue(profileRepo.findByCredentialId("u1").isPresent());
         assertEquals("alice", profileRepo.findByCredentialId("u1").get().getUsername());
     }
@@ -97,12 +85,9 @@ class RepositoryIntegrationTest {
         profileRepo.save(UserProfile.builder()
                 .id("p1").credential(savedUser).username("Alice")
                 .emailVerified(false).build());
-
         assertTrue(profileRepo.existsByUsername("Alice"));
-        assertFalse(profileRepo.existsByUsername("alice")); // case-sensitive in H2
+        assertFalse(profileRepo.existsByUsername("alice"));
     }
-
-    // ── ServiceRepository ─────────────────────────────────────
 
     @Test
     void service_FindAllByActiveTrue_FiltersInactive() {
@@ -110,7 +95,6 @@ class RepositoryIntegrationTest {
                 .id("s2").name("IT Support").description("IT help")
                 .expectedDurationMinutes(10).priorityLevel(Service.PriorityLevel.LOW)
                 .active(false).build());
-
         List<Service> active = serviceRepo.findAllByActiveTrue();
         assertEquals(1, active.size());
         assertEquals("Advising", active.get(0).getName());
@@ -123,15 +107,11 @@ class RepositoryIntegrationTest {
         assertFalse(serviceRepo.existsByNameIgnoreCase("Clinic"));
     }
 
-    // ── QueueRepository ───────────────────────────────────────
-
     @Test
     void queue_FindByServiceId_ReturnsQueue() {
         assertTrue(queueRepo.findByServiceId("s1").isPresent());
         assertFalse(queueRepo.findByServiceId("bad").isPresent());
     }
-
-    // ── QueueEntryRepository ──────────────────────────────────
 
     @Test
     void entry_FindActiveByQueueIdOrdered_ReturnsOnlyWaiting() {
@@ -153,19 +133,16 @@ class RepositoryIntegrationTest {
 
     @Test
     void entry_PriorityOrdering_HighBeforeLow() {
-        // Create a second user for this test
         UserCredential user2 = credentialRepo.save(UserCredential.builder()
                 .id("u2").email("bob@example.com")
                 .password("hashed").role(UserCredential.Role.USER).build());
 
         LocalDateTime now = LocalDateTime.now();
-
         entryRepo.save(QueueEntry.builder()
                 .id("e-low").queue(savedQueue).user(savedUser)
                 .position(1).joinedAt(now)
                 .status(QueueEntry.EntryStatus.WAITING)
                 .priorityLevel(Service.PriorityLevel.LOW).build());
-
         entryRepo.save(QueueEntry.builder()
                 .id("e-high").queue(savedQueue).user(user2)
                 .position(2).joinedAt(now.plusSeconds(1))
@@ -173,37 +150,35 @@ class RepositoryIntegrationTest {
                 .priorityLevel(Service.PriorityLevel.HIGH).build());
 
         List<QueueEntry> ordered = entryRepo.findActiveByQueueIdOrdered("q1");
-        assertEquals("e-high", ordered.get(0).getId()); // HIGH comes first
+        assertEquals("e-high", ordered.get(0).getId());
         assertEquals("e-low",  ordered.get(1).getId());
     }
 
     @Test
-    void entry_CountByQueueIdAndStatus_IsCorrect() {
+    void entry_CountByQueue_IdAndStatus_IsCorrect() {
         entryRepo.save(QueueEntry.builder()
                 .id("e1").queue(savedQueue).user(savedUser)
                 .position(1).joinedAt(LocalDateTime.now())
                 .status(QueueEntry.EntryStatus.WAITING)
                 .priorityLevel(Service.PriorityLevel.MEDIUM).build());
 
-        assertEquals(1, entryRepo.countByQueueIdAndStatus("q1", QueueEntry.EntryStatus.WAITING));
-        assertEquals(0, entryRepo.countByQueueIdAndStatus("q1", QueueEntry.EntryStatus.SERVED));
+        assertEquals(1, entryRepo.countByQueue_IdAndStatus("q1", QueueEntry.EntryStatus.WAITING));
+        assertEquals(0, entryRepo.countByQueue_IdAndStatus("q1", QueueEntry.EntryStatus.SERVED));
     }
 
     @Test
-    void entry_FindByQueueIdAndUserIdAndStatus_ReturnsCorrectEntry() {
+    void entry_FindByQueue_IdAndUser_IdAndStatus_ReturnsCorrectEntry() {
         entryRepo.save(QueueEntry.builder()
                 .id("e1").queue(savedQueue).user(savedUser)
                 .position(1).joinedAt(LocalDateTime.now())
                 .status(QueueEntry.EntryStatus.WAITING)
                 .priorityLevel(Service.PriorityLevel.MEDIUM).build());
 
-        assertTrue(entryRepo.findByQueueIdAndUserIdAndStatus("q1", "u1",
+        assertTrue(entryRepo.findByQueue_IdAndUser_IdAndStatus("q1", "u1",
                 QueueEntry.EntryStatus.WAITING).isPresent());
-        assertFalse(entryRepo.findByQueueIdAndUserIdAndStatus("q1", "u1",
+        assertFalse(entryRepo.findByQueue_IdAndUser_IdAndStatus("q1", "u1",
                 QueueEntry.EntryStatus.SERVED).isPresent());
     }
-
-    // ── NotificationRepository ────────────────────────────────
 
     @Test
     void notification_FindUnreadByUserId_FiltersReadOnes() {
@@ -214,7 +189,7 @@ class RepositoryIntegrationTest {
                 .id("n2").user(savedUser).message("Done").read(true)
                 .type(Notification.NotificationType.YOUR_TURN).build());
 
-        List<Notification> unread = notifRepo.findByUserIdAndReadFalseOrderByCreatedAtDesc("u1");
+        List<Notification> unread = notifRepo.findByUser_IdAndReadFalseOrderByCreatedAtDesc("u1");
         assertEquals(1, unread.size());
         assertEquals("n1", unread.get(0).getId());
     }
@@ -231,13 +206,11 @@ class RepositoryIntegrationTest {
                 .id("n3").user(savedUser).message("C").read(true)
                 .type(Notification.NotificationType.YOUR_TURN).build());
 
-        assertEquals(2, notifRepo.countByUserIdAndReadFalse("u1"));
+        assertEquals(2, notifRepo.countByUser_IdAndReadFalse("u1"));
     }
 
-    // ── HistoryRecordRepository ───────────────────────────────
-
     @Test
-    void history_FindByUserId_ReturnsMostRecentFirst() {
+    void history_FindByUser_IdOrderByJoinedAtDesc_ReturnsMostRecentFirst() {
         historyRepo.save(HistoryRecord.builder()
                 .id("h1").user(savedUser).serviceName("Advising")
                 .joinedAt(LocalDateTime.now().minusHours(2))
@@ -247,9 +220,9 @@ class RepositoryIntegrationTest {
                 .joinedAt(LocalDateTime.now().minusHours(1))
                 .finalStatus(QueueEntry.EntryStatus.LEFT).waitedMinutes(5).build());
 
-        List<HistoryRecord> records = historyRepo.findByUserIdOrderByJoinedAtDesc("u1");
+        List<HistoryRecord> records = historyRepo.findByUser_IdOrderByJoinedAtDesc("u1");
         assertEquals(2, records.size());
-        assertEquals("h2", records.get(0).getId()); // most recent first
+        assertEquals("h2", records.get(0).getId());
     }
 
     @Test
@@ -280,8 +253,7 @@ class RepositoryIntegrationTest {
                 .finalStatus(QueueEntry.EntryStatus.LEFT).waitedMinutes(5).build());
 
         List<Object[]> counts = historyRepo.countGroupedByServiceName();
-        assertEquals(2, counts.size()); // 2 distinct service names
-
+        assertEquals(2, counts.size());
         List<Object[]> avgs = historyRepo.avgWaitGroupedByServiceName();
         assertEquals(2, avgs.size());
     }

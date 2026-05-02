@@ -53,7 +53,12 @@ class QueueControllerTest {
         status.setServiceId("svc-1"); status.setTotalWaiting(2); status.setEntries(List.of());
         when(queueService.getQueueStatus("svc-1")).thenReturn(status);
         mockMvc.perform(get("/api/queue/status/svc-1"))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalWaiting").value(2));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalWaiting").value(2));
+>>>>>>> Stashed changes
     }
 
     @Test
@@ -63,27 +68,55 @@ class QueueControllerTest {
         when(queueService.joinQueue(any(), any(), any())).thenReturn(mockEntry());
         mockMvc.perform(post("/api/queue/join").contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)).principal(userAuth()))
+<<<<<<< Updated upstream
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.data.position").value(1));
+=======
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.position").value(1));
+>>>>>>> Stashed changes
     }
 
     @Test
     void leaveQueue_ReturnsOk() throws Exception {
         doNothing().when(queueService).leaveQueue(any(), any());
         mockMvc.perform(delete("/api/queue/leave/svc-1").principal(userAuth()))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+>>>>>>> Stashed changes
     }
 
     @Test
     void getMyQueueEntry_ReturnsOk() throws Exception {
         when(queueService.getUserQueueEntry(any(), any())).thenReturn(mockEntry());
         mockMvc.perform(get("/api/queue/my/svc-1").principal(userAuth()))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.id").value("e1"));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("e1"));
+    }
+
+    @Test
+    void getAllMyQueueEntries_ReturnsOk() throws Exception {
+        when(queueService.getAllUserQueueEntries("u1")).thenReturn(List.of(mockEntry()));
+        mockMvc.perform(get("/api/queue/my").principal(userAuth()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value("e1"));
+>>>>>>> Stashed changes
     }
 
     @Test
     void serveNext_ReturnsOk() throws Exception {
         when(queueService.serveNext("svc-1")).thenReturn(mockEntry());
         mockMvc.perform(post("/api/queue/serve/svc-1"))
+<<<<<<< Updated upstream
                 .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+=======
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+>>>>>>> Stashed changes
     }
 }
